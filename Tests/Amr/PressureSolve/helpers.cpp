@@ -26,7 +26,7 @@ amrex::Geometry DefineGeometry(int nx, int ny, int nz, double dx)
     const amrex::RealBox real_box({0.0, 0.0, 0.0},
                                  {nx * dx, ny * dx, nz * dx});
     constexpr amrex::CoordSys::CoordType coord = amrex::CoordSys::CoordType::cartesian;
-    const amrex::IntArray is_periodic{1, 1, 1};  // Periodic in all directions
+    const amrex::IntArray is_periodic{0, 0, 0};  // Non-periodic in all directions
 
     const amrex::Box domain(amrex::IntVect(0, 0, 0),
                            amrex::IntVect(nx - 1, ny - 1, nz - 1));
@@ -57,6 +57,7 @@ void DefineFABs(
 
     // Pressure is cell-centered
     pressure.define(ba, dm, SingleComp, PressureGhosts);
+    pressure.setVal(0.0);  // Initialize all cells (including ghosts) to zero
 
     // Velocity components are face-centered
     const auto Uba = amrex::convert(ba, amrex::IntVect::TheDimensionVector(U));
@@ -66,6 +67,11 @@ void DefineFABs(
     velocity[U].define(Uba, dm, SingleComp, VelocityGhosts);
     velocity[V].define(Vba, dm, SingleComp, VelocityGhosts);
     velocity[W].define(Wba, dm, SingleComp, VelocityGhosts);
+
+    // Initialize velocity components to zero
+    for (int d = 0; d < 3; ++d) {
+        velocity[d].setVal(0.0);  // Initialize all cells (including ghosts) to zero
+    }
 }
 
 void InitializeVelocity(
@@ -185,8 +191,22 @@ void GaussSeidelIteration(
         }
     }
 
-    // Fill ghost cells
+    // Fill internal ghost cells between patches
     pressure.FillBoundary(geom.periodicity());
+
+    // Fill physical boundary ghost cells with proper boundary conditions
+    amrex::Vector<amrex::BCRec> bc_lo, bc_hi;
+    bc_lo.resize(1);
+    bc_hi.resize(1);
+    for (int n = 0; n < 1; ++n) {
+        bc_lo[n].setLo(0, amrex::BCType::foextrap);
+        bc_hi[n].setHi(0, amrex::BCType::foextrap);
+        bc_lo[n].setLo(1, amrex::BCType::foextrap);
+        bc_hi[n].setHi(1, amrex::BCType::foextrap);
+        bc_lo[n].setLo(2, amrex::BCType::foextrap);
+        bc_hi[n].setHi(2, amrex::BCType::foextrap);
+    }
+    amrex::FillDomainBoundary(pressure, geom, bc_lo);
 }
 
 amrex::Real ComputeResidual(
