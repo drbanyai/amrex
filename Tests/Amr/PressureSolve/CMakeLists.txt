@@ -1,20 +1,11 @@
-add_executable(PressureSolve
-    main.cpp
-    helpers.cpp
-)
+if (NOT 3 IN_LIST AMReX_SPACEDIM)
+   return ()
+endif ()
 
-target_link_libraries(PressureSolve
-    PRIVATE
-    AMReX::amrex
-)
+set(_sources  main.cpp helpers.cpp)
+set(_input_files )
 
-target_include_directories(PressureSolve
-    PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+setup_test(3 _sources _input_files)
 
-# Only support 3D for now
-target_compile_definitions(PressureSolve
-    PRIVATE
-    AMREX_SPACEDIM=3
-) 
+unset(_sources)
+unset(_input_files)
