@@ -32,18 +32,6 @@ void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom);
 
-// Pressure solver
-void GaussSeidelIteration(
-    amrex::MultiFab& pressure,
-    const amrex::MultiFab& divergence,
-    const amrex::Geometry& geom,
-    amrex::Real omega = 1.0);  // Under-relaxation parameter
-
-amrex::Real ComputeResidual(
-    const amrex::MultiFab& pressure,
-    const amrex::MultiFab& divergence,
-    const amrex::Geometry& geom);
-
 // Main pressure solver function
 void SolvePressure(
     amrex::MultiFab& pressure,

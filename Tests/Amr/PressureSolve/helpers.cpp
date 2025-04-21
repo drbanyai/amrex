@@ -16,11 +16,28 @@
 static constexpr int U = 0;
 static constexpr int V = 1;
 static constexpr int W = 2;
+/*--------------------------------------------------------------------
+  private free function declarations
+  --------------------------------------------------------------------*/
+static void GaussSeidelIteration(
+    amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom,
+    amrex::Real omega);
+
+static amrex::Real ComputeResidual(
+    const amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom);
+
+static void ComputeDivergence(
+    amrex::MultiFab& divergence,
+    const std::array<amrex::MultiFab, 3>& velocity,
+    const amrex::Geometry& geom);
 
 /*--------------------------------------------------------------------
-  free function definitions
+  public free function definitions
   --------------------------------------------------------------------*/
-
 amrex::Geometry DefineGeometry(int nx, int ny, int nz, double dx)
 {
     const amrex::RealBox real_box({0.0, 0.0, 0.0},
@@ -118,146 +135,6 @@ void InitializeVelocity(
     }
 }
 
-// Private helper function for computing divergence
-static void ComputeDivergence(
-    amrex::MultiFab& divergence,
-    const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom)
-{
-    const amrex::Real dx = geom.CellSize(0);
-    const amrex::Real dxinv = 1.0 / dx;
-
-    for (amrex::MFIter mfi(divergence); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& div_arr = divergence.array(mfi);
-        const auto& u_arr = velocity[U].array(mfi);
-        const auto& v_arr = velocity[V].array(mfi);
-        const auto& w_arr = velocity[W].array(mfi);
-
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-
-        for (int i = lo.x; i <= hi.x; ++i)
-        {
-            for (int j = lo.y; j <= hi.y; ++j)
-            {
-                for (int k = lo.z; k <= hi.z; ++k)
-                {
-                    // Compute divergence using central differences
-                    div_arr(i, j, k) = dxinv * (
-                        u_arr(i + 1, j, k) - u_arr(i, j, k) +
-                        v_arr(i, j + 1, k) - v_arr(i, j, k) +
-                        w_arr(i, j, k + 1) - w_arr(i, j, k));
-                }
-            }
-        }
-    }
-}
-
-void GaussSeidelIteration(
-    amrex::MultiFab& pressure,
-    const amrex::MultiFab& divergence,
-    const amrex::Geometry& geom,
-    amrex::Real omega)
-{
-    const amrex::Real dx = geom.CellSize(0);
-    const amrex::Real dx2 = dx * dx;
-
-    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& p_arr = pressure.array(mfi);
-        const auto& div_arr = divergence.array(mfi);
-
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-
-        for (int i = lo.x; i <= hi.x; ++i)
-        {
-            for (int j = lo.y; j <= hi.y; ++j)
-            {
-                for (int k = lo.z; k <= hi.z; ++k)
-                {
-                    // Gauss-Seidel update with under-relaxation
-                    const amrex::Real p_new = (1.0 / 6.0) * (
-                        p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
-                        p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
-                        p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
-                        dx2 * div_arr(i, j, k));
-
-                    p_arr(i, j, k) = (1.0 - omega) * p_arr(i, j, k) + omega * p_new;
-                }
-            }
-        }
-    }
-
-    // Fill internal ghost cells between patches
-    pressure.FillBoundary(geom.periodicity());
-
-    // Fill physical boundary ghost cells with proper boundary conditions
-    amrex::Vector<amrex::BCRec> bc_lo, bc_hi;
-    bc_lo.resize(1);
-    bc_hi.resize(1);
-    for (int n = 0; n < 1; ++n) {
-        bc_lo[n].setLo(0, amrex::BCType::foextrap);
-        bc_hi[n].setHi(0, amrex::BCType::foextrap);
-        bc_lo[n].setLo(1, amrex::BCType::foextrap);
-        bc_hi[n].setHi(1, amrex::BCType::foextrap);
-        bc_lo[n].setLo(2, amrex::BCType::foextrap);
-        bc_hi[n].setHi(2, amrex::BCType::foextrap);
-    }
-    amrex::FillDomainBoundary(pressure, geom, bc_lo);
-}
-
-amrex::Real ComputeResidual(
-    const amrex::MultiFab& pressure,
-    const amrex::MultiFab& divergence,
-    const amrex::Geometry& geom)
-{
-    const amrex::Real dx = geom.CellSize(0);
-    const amrex::Real dx2 = dx * dx;
-
-    amrex::Real residual = 0.0;
-    amrex::Real volume = 0.0;
-
-    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& p_arr = pressure.array(mfi);
-        const auto& div_arr = divergence.array(mfi);
-
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-
-        for (int i = lo.x; i <= hi.x; ++i)
-        {
-            for (int j = lo.y; j <= hi.y; ++j)
-            {
-                for (int k = lo.z; k <= hi.z; ++k)
-                {
-                    // Compute residual using central differences
-                    const amrex::Real lap_p = (
-                        p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
-                        p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
-                        p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
-                        6.0 * p_arr(i, j, k)) / dx2;
-
-                    const amrex::Real res = lap_p - div_arr(i, j, k);
-                    residual += res * res;
-                    volume += 1.0;
-                }
-            }
-        }
-    }
-
-    // Sum across processors
-    amrex::ParallelDescriptor::ReduceRealSum(residual);
-    amrex::ParallelDescriptor::ReduceRealSum(volume);
-
-    return std::sqrt(residual / volume);
-}
-
 void SolvePressure(
     amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
@@ -345,6 +222,149 @@ void CheckResults(
     amrex::Print() << "Pressure solution verification:\n";
     amrex::Print() << "  Maximum error: " << max_error << "\n";
     amrex::Print() << "  Average error: " << avg_error << "\n";
+}
+
+
+/*--------------------------------------------------------------------
+  private free function definitions
+  --------------------------------------------------------------------*/
+static void ComputeDivergence(
+    amrex::MultiFab& divergence,
+    const std::array<amrex::MultiFab, 3>& velocity,
+    const amrex::Geometry& geom)
+{
+    const amrex::Real dx = geom.CellSize(0);
+    const amrex::Real dxinv = 1.0 / dx;
+
+    for (amrex::MFIter mfi(divergence); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& div_arr = divergence.array(mfi);
+        const auto& u_arr = velocity[U].array(mfi);
+        const auto& v_arr = velocity[V].array(mfi);
+        const auto& w_arr = velocity[W].array(mfi);
+
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+
+        for (int i = lo.x; i <= hi.x; ++i)
+        {
+            for (int j = lo.y; j <= hi.y; ++j)
+            {
+                for (int k = lo.z; k <= hi.z; ++k)
+                {
+                    // Compute divergence using central differences
+                    div_arr(i, j, k) = dxinv * (
+                        u_arr(i + 1, j, k) - u_arr(i, j, k) +
+                        v_arr(i, j + 1, k) - v_arr(i, j, k) +
+                        w_arr(i, j, k + 1) - w_arr(i, j, k));
+                }
+            }
+        }
+    }
+}
+
+static void GaussSeidelIteration(
+    amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom,
+    amrex::Real omega)
+{
+    const amrex::Real dx = geom.CellSize(0);
+    const amrex::Real dx2 = dx * dx;
+
+    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& p_arr = pressure.array(mfi);
+        const auto& div_arr = divergence.array(mfi);
+
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+
+        for (int i = lo.x; i <= hi.x; ++i)
+        {
+            for (int j = lo.y; j <= hi.y; ++j)
+            {
+                for (int k = lo.z; k <= hi.z; ++k)
+                {
+                    // Gauss-Seidel update with under-relaxation
+                    const amrex::Real p_new = (1.0 / 6.0) * (
+                        p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
+                        p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
+                        p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
+                        dx2 * div_arr(i, j, k));
+
+                    p_arr(i, j, k) = (1.0 - omega) * p_arr(i, j, k) + omega * p_new;
+                }
+            }
+        }
+    }
+
+    // Fill internal ghost cells between patches
+    pressure.FillBoundary(geom.periodicity());
+
+    // Fill physical boundary ghost cells with proper boundary conditions
+    amrex::Vector<amrex::BCRec> bc_lo, bc_hi;
+    bc_lo.resize(1);
+    bc_hi.resize(1);
+    for (int n = 0; n < 1; ++n) {
+        bc_lo[n].setLo(0, amrex::BCType::foextrap);
+        bc_hi[n].setHi(0, amrex::BCType::foextrap);
+        bc_lo[n].setLo(1, amrex::BCType::foextrap);
+        bc_hi[n].setHi(1, amrex::BCType::foextrap);
+        bc_lo[n].setLo(2, amrex::BCType::foextrap);
+        bc_hi[n].setHi(2, amrex::BCType::foextrap);
+    }
+    amrex::FillDomainBoundary(pressure, geom, bc_lo);
+}
+
+static amrex::Real ComputeResidual(
+    const amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom)
+{
+    const amrex::Real dx = geom.CellSize(0);
+    const amrex::Real dx2 = dx * dx;
+
+    amrex::Real residual = 0.0;
+    amrex::Real volume = 0.0;
+
+    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& p_arr = pressure.array(mfi);
+        const auto& div_arr = divergence.array(mfi);
+
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+
+        for (int i = lo.x; i <= hi.x; ++i)
+        {
+            for (int j = lo.y; j <= hi.y; ++j)
+            {
+                for (int k = lo.z; k <= hi.z; ++k)
+                {
+                    // Compute residual using central differences
+                    const amrex::Real lap_p = (
+                        p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
+                        p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
+                        p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
+                        6.0 * p_arr(i, j, k)) / dx2;
+
+                    const amrex::Real res = lap_p - div_arr(i, j, k);
+                    residual += res * res;
+                    volume += 1.0;
+                }
+            }
+        }
+    }
+
+    // Sum across processors
+    amrex::ParallelDescriptor::ReduceRealSum(residual);
+    amrex::ParallelDescriptor::ReduceRealSum(volume);
+
+    return std::sqrt(residual / volume);
 }
 
 /*--------------------------------------------------------------------
