@@ -54,30 +54,8 @@ int MyMain()
     // Initialize velocity field
     InitializeVelocity(velocity, geom);
 
-    // Allocate and compute divergence
-    amrex::MultiFab divergence(ba, dm, 1, 0);
-    ComputeDivergence(divergence, velocity, geom);
-
-    // Initialize pressure to zero
-    pressure.setVal(0.0);
-
     // Solve for pressure
-    amrex::Real residual = 1.0;
-    int iteration = 0;
-
-    while (residual > tolerance && iteration < max_iterations)
-    {
-        GaussSeidelIteration(pressure, divergence, geom, omega);
-        residual = ComputeResidual(pressure, divergence, geom);
-        iteration++;
-
-        if (iteration % 100 == 0)
-        {
-            amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
-        }
-    }
-
-    amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
+    SolvePressure(pressure, velocity, geom, tolerance, max_iterations, omega);
 
     // Verify results
     CheckResults(pressure, velocity, geom);

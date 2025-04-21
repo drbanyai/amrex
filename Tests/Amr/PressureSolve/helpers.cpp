@@ -118,7 +118,8 @@ void InitializeVelocity(
     }
 }
 
-void ComputeDivergence(
+// Private helper function for computing divergence
+static void ComputeDivergence(
     amrex::MultiFab& divergence,
     const std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom)
@@ -255,6 +256,40 @@ amrex::Real ComputeResidual(
     amrex::ParallelDescriptor::ReduceRealSum(volume);
 
     return std::sqrt(residual / volume);
+}
+
+void SolvePressure(
+    amrex::MultiFab& pressure,
+    const std::array<amrex::MultiFab, 3>& velocity,
+    const amrex::Geometry& geom,
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega)
+{
+    // Allocate and compute divergence
+    amrex::MultiFab divergence(pressure.boxArray(), pressure.DistributionMap(), 1, 0);
+    ComputeDivergence(divergence, velocity, geom);
+
+    // Initialize pressure to zero
+    pressure.setVal(0.0);
+
+    // Solve for pressure
+    amrex::Real residual = 1.0;
+    int iteration = 0;
+
+    while (residual > tolerance && iteration < max_iterations)
+    {
+        GaussSeidelIteration(pressure, divergence, geom, omega);
+        residual = ComputeResidual(pressure, divergence, geom);
+        iteration++;
+
+        if (iteration % 100 == 0)
+        {
+            amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
+        }
+    }
+
+    amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
 }
 
 void CheckResults(

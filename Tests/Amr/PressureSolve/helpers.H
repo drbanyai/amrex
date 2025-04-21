@@ -33,11 +33,6 @@ void InitializeVelocity(
     const amrex::Geometry& geom);
 
 // Pressure solver
-void ComputeDivergence(
-    amrex::MultiFab& divergence,
-    const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom);
-
 void GaussSeidelIteration(
     amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
@@ -48,6 +43,15 @@ amrex::Real ComputeResidual(
     const amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom);
+
+// Main pressure solver function
+void SolvePressure(
+    amrex::MultiFab& pressure,
+    const std::array<amrex::MultiFab, 3>& velocity,
+    const amrex::Geometry& geom,
+    amrex::Real tolerance = 1.0e-6,
+    int max_iterations = 1000,
+    amrex::Real omega = 1.0);
 
 // Verification
 void CheckResults(
