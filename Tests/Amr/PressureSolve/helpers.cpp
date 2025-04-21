@@ -222,6 +222,11 @@ void CheckResults(
     amrex::Print() << "Pressure solution verification:\n";
     amrex::Print() << "  Maximum error: " << max_error << "\n";
     amrex::Print() << "  Average error: " << avg_error << "\n";
+
+    const amrex::Real error_tolerance = 100.0;
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(avg_error <= error_tolerance,
+        "Average pressure error " + std::to_string(avg_error) +
+        " exceeds maximum allowed value of " + std::to_string(error_tolerance));
 }
 
 
