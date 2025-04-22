@@ -370,10 +370,19 @@ static void GaussSeidelIteration(
             }
         }
 
-        // Print pressure at (0,0,0) after iteration
-        if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
-            const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
-            amrex::Print() << "Pressure at (0,0,0): " << p_arr(0,0,0)
+        // Print pressure at a cell near the center
+        const auto& domain = geom.Domain();
+        const int center_i = domain.length(0) / 2;
+        const int center_j = domain.length(1) / 2;
+        const int center_k = domain.length(2) / 2;
+
+        if (lo.x <= center_i && hi.x >= center_i &&
+            lo.y <= center_j && hi.y >= center_j &&
+            lo.z <= center_k && hi.z >= center_k) {
+            const amrex::Real expected = ExpectedPressure(geom, center_i, center_j, center_k);
+            amrex::Print() << "Pressure at center cell (" 
+                          << center_i << "," << center_j << "," << center_k << "): " 
+                          << p_arr(center_i,center_j,center_k)
                           << " (expected: " << expected << ")\n";
         }
     }
