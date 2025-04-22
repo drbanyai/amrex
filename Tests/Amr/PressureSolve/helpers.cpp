@@ -335,7 +335,12 @@ static void GaussSeidelIteration(
     amrex::PhysBCFunct<PressureBndryFunc> physbc(geom, bc, pbf);
 
     // Fill ghost cells with boundary conditions
-    physbc.FillBoundary(pressure, 0, 1, amrex::IntVect(0), 0.0, 0);
+    const int start_comp = 0;  // Starting component
+    const int num_comp = 1;    // Number of components
+    const amrex::IntVect nghost(1);  // Ghost cell width
+    const amrex::Real time = 0.0;    // Time
+    const int bccomp = 0;      // Starting component for boundary conditions
+    physbc.FillBoundary(pressure, start_comp, num_comp, nghost, time, bccomp);
 
     // Now do standard Gauss-Seidel iteration for all cells in the domain
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
@@ -363,27 +368,11 @@ static void GaussSeidelIteration(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    // Get boundary values if needed
-                    amrex::Real p_im1 = (i > lo.x) ? p_arr(i-1,j,k) : ExpectedPressure(geom, i-1, j, k);
-                    amrex::Real p_ip1 = (i < hi.x) ? p_arr(i+1,j,k) : ExpectedPressure(geom, i+1, j, k);
-                    amrex::Real p_jm1 = (j > lo.y) ? p_arr(i,j-1,k) : ExpectedPressure(geom, i, j-1, k);
-                    amrex::Real p_jp1 = (j < hi.y) ? p_arr(i,j+1,k) : ExpectedPressure(geom, i, j+1, k);
-                    amrex::Real p_km1 = (k > lo.z) ? p_arr(i,j,k-1) : ExpectedPressure(geom, i, j, k-1);
-                    amrex::Real p_kp1 = (k < hi.z) ? p_arr(i,j,k+1) : ExpectedPressure(geom, i, j, k+1);
-
                     // Gauss-Seidel update with under-relaxation
                     const amrex::Real p_new = (1.0 / 6.0) * (
-#if 0
-                        // TODO: This is supposed to work, but apparently PressureBndryFunc is not
-                        // setting the external ghosts to the ExpectedPressure() as intended
                         p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
                         p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
                         p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
-#else
-                        p_ip1 + p_im1 +
-                        p_jp1 + p_jm1 +
-                        p_kp1 + p_km1 -
-#endif
                         dx2 * div_arr(i, j, k));
 
                     p_arr(i, j, k) = (1.0 - omega) * p_arr(i, j, k) + omega * p_new;
