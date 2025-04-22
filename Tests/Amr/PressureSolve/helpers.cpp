@@ -8,6 +8,7 @@
   --------------------------------------------------------------------*/
 #include <AMReX_BCUtil.H>
 #include <AMReX_MultiFabUtil.H>
+#include <AMReX_PhysBCFunct.H>
 
 /*--------------------------------------------------------------------
   defines and static variables
@@ -19,6 +20,45 @@ static constexpr int W = 2;
 /*--------------------------------------------------------------------
   private free function declarations
   --------------------------------------------------------------------*/
+static amrex::Real ExpectedPressure(
+    const amrex::Geometry& geom,
+    const int i,
+    const int j,
+    const int k)
+{
+    const amrex::Real x = geom.CellCenter(i, U);
+    const amrex::Real y = geom.CellCenter(j, V);
+    const amrex::Real z = geom.CellCenter(k, W);
+    constexpr amrex::Real coeff = 1.0/6.0;
+    return coeff * (x * x + y * y + z * z);
+}
+
+class PressureBndryFunc
+{
+public:
+    void operator()(
+        amrex::Box const& bx,
+        amrex::FArrayBox& data,
+        const int dcomp,
+        const int numcomp,
+        amrex::Geometry const& geom,
+        const amrex::Real time,
+        const amrex::Vector<amrex::BCRec>& bcr,
+        const int bcomp,
+        const int scomp) const
+    {
+        const auto lo = amrex::lbound(bx);
+        const auto hi = amrex::ubound(bx);
+        const auto arr = data.array();
+
+        amrex::ParallelFor(bx, numcomp,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k, int n) noexcept
+            {
+                arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k);
+            });
+    }
+};
+
 static void GaussSeidelIteration(
     amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
@@ -218,12 +258,11 @@ void CheckResults(
     amrex::ParallelDescriptor::ReduceRealSum(volume);
 
     avg_error /= volume;
-
     amrex::Print() << "Pressure solution verification:\n";
     amrex::Print() << "  Maximum error: " << max_error << "\n";
     amrex::Print() << "  Average error: " << avg_error << "\n";
 
-    const amrex::Real error_tolerance = 100.0;
+    const amrex::Real error_tolerance = 1.0;
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(avg_error <= error_tolerance,
         "Average pressure error " + std::to_string(avg_error) +
         " exceeds maximum allowed value of " + std::to_string(error_tolerance));
@@ -278,6 +317,26 @@ static void GaussSeidelIteration(
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dx2 = dx * dx;
 
+    // Define boundary conditions
+    amrex::Vector<amrex::BCRec> bc(1);
+    
+    // Set Dirichlet boundary conditions based on expected solution
+    for (int n = 0; n < 1; ++n) {
+        // For each direction, set the boundary condition type and value
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+            bc[n].setLo(dir, amrex::BCType::ext_dir);  // External Dirichlet
+            bc[n].setHi(dir, amrex::BCType::ext_dir);  // External Dirichlet
+        }
+    }
+
+    // Create boundary condition functor
+    PressureBndryFunc pbf;
+    amrex::PhysBCFunct<PressureBndryFunc> physbc(geom, bc, pbf);
+
+    // Fill ghost cells with boundary conditions
+    physbc.FillBoundary(pressure, 0, 1, amrex::IntVect(0), 0.0, 0);
+
+    // Now do standard Gauss-Seidel iteration for all cells in the domain
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
     {
         const amrex::Box& box = mfi.validbox();
@@ -286,6 +345,13 @@ static void GaussSeidelIteration(
 
         const auto lo = amrex::lbound(box);
         const auto hi = amrex::ubound(box);
+
+        // Print pressure at (0,0,0) before iteration
+        if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
+            const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
+            amrex::Print() << "Pressure at (0,0,0) before iteration: " << p_arr(0,0,0) 
+                          << " (expected: " << expected << ")\n";
+        }
 
         for (int i = lo.x; i <= hi.x; ++i)
         {
@@ -304,24 +370,17 @@ static void GaussSeidelIteration(
                 }
             }
         }
+
+        // Print pressure at (0,0,0) after iteration
+        if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
+            const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
+            amrex::Print() << "Pressure at (0,0,0) after iteration: " << p_arr(0,0,0)
+                          << " (expected: " << expected << ")\n";
+        }
     }
 
     // Fill internal ghost cells between patches
     pressure.FillBoundary(geom.periodicity());
-
-    // Fill physical boundary ghost cells with proper boundary conditions
-    amrex::Vector<amrex::BCRec> bc_lo, bc_hi;
-    bc_lo.resize(1);
-    bc_hi.resize(1);
-    for (int n = 0; n < 1; ++n) {
-        bc_lo[n].setLo(0, amrex::BCType::foextrap);
-        bc_hi[n].setHi(0, amrex::BCType::foextrap);
-        bc_lo[n].setLo(1, amrex::BCType::foextrap);
-        bc_hi[n].setHi(1, amrex::BCType::foextrap);
-        bc_lo[n].setLo(2, amrex::BCType::foextrap);
-        bc_hi[n].setHi(2, amrex::BCType::foextrap);
-    }
-    amrex::FillDomainBoundary(pressure, geom, bc_lo);
 }
 
 static amrex::Real ComputeResidual(
