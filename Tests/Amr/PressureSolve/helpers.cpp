@@ -201,7 +201,7 @@ void SolvePressure(
         residual = ComputeResidual(pressure, divergence, geom);
         iteration++;
 
-        if (iteration % 100 == 0)
+        if ((max_iterations < 100) || (iteration % 100 == 0))
         {
             amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
         }
@@ -352,16 +352,6 @@ static void GaussSeidelIteration(
         const auto lo = amrex::lbound(box);
         const auto hi = amrex::ubound(box);
 
-        // Print pressure at (0,0,0) before iteration
-        if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
-            const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
-            amrex::Print() << "Iteration " << iteration << " - Pressure at (0,0,0) before: " << p_arr(0,0,0) 
-                          << " (expected: " << expected << ")\n";
-            // Add debug print for boundary cell
-            amrex::Print() << "Iteration " << iteration << " - Pressure at (-1,0,0) before: " << p_arr(-1,0,0) 
-                          << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
-        }
-
         for (int i = lo.x; i <= hi.x; ++i)
         {
             for (int j = lo.y; j <= hi.y; ++j)
@@ -383,11 +373,8 @@ static void GaussSeidelIteration(
         // Print pressure at (0,0,0) after iteration
         if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
             const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
-            amrex::Print() << "Iteration " << iteration << " - Pressure at (0,0,0) after: " << p_arr(0,0,0)
+            amrex::Print() << "Pressure at (0,0,0): " << p_arr(0,0,0)
                           << " (expected: " << expected << ")\n";
-            // Add debug print for boundary cell
-            amrex::Print() << "Iteration " << iteration << " - Pressure at (-1,0,0) after: " << p_arr(-1,0,0)
-                          << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
         }
     }
 
