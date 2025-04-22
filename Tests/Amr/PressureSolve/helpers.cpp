@@ -88,7 +88,7 @@ amrex::Geometry DefineGeometry(int nx, int ny, int nz, double dx)
     const amrex::RealBox real_box({0.0, 0.0, 0.0},
                                  {nx * dx, ny * dx, nz * dx});
     constexpr amrex::CoordSys::CoordType coord = amrex::CoordSys::CoordType::cartesian;
-    const amrex::IntArray is_periodic{0, 0, 0};  // Non-periodic in all directions
+    const amrex::IntArray is_periodic{1, 1, 1};  // Periodic in all directions
 
     const amrex::Box domain(amrex::IntVect(0, 0, 0),
                            amrex::IntVect(nx - 1, ny - 1, nz - 1));
@@ -140,35 +140,36 @@ void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom)
 {
-    // Initialize with a simple velocity field that has known divergence
-    // For testing, we'll use a field with constant divergence
-    const amrex::Real div = 1.0;  // Constant divergence
-
+    // Get domain center
+    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
+    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
+    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
+    
+    // Find the cell indices closest to center
+    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
+    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
+    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
+    
+    // Initialize all velocities to zero
     for (int d = 0; d < 3; ++d) {
-        for (amrex::MFIter mfi(velocity[d]); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box& box = mfi.validbox();
-            const auto& vel_arr = velocity[d].array(mfi);
-
-            const auto lo = amrex::lbound(box);
-            const auto hi = amrex::ubound(box);
-
-            for (int i = lo.x; i <= hi.x; ++i)
-            {
-                for (int j = lo.y; j <= hi.y; ++j)
-                {
-                    for (int k = lo.z; k <= hi.z; ++k)
-                    {
-                        // Find the x-, y-, or z-coordinate of given face
-                        const int ijk = (d == U) ? i : (d == V) ? j : k;
-                        const amrex::Real xyz = geom.LoEdge(ijk, d);
-                        vel_arr(i, j, k) = div * xyz / 3.0;
-                    }
-                }
-            }
+        velocity[d].setVal(0.0);
+    }
+    
+    // Set the dipole in the x-direction
+    for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& u_arr = velocity[U].array(mfi);
+        
+        // Only set velocities if the center cells are in this box
+        if (box.contains(center_i, center_j, center_k)) { 
+            u_arr(center_i, center_j, center_k) = -1.0;
+        }
+        if (box.contains(center_i+1, center_j, center_k)) {
+            u_arr(center_i+1, center_j, center_k) = 1.0;
         }
     }
-
+    
     // Fill ghost cells
     for (int d = 0; d < 3; ++d)
     {
