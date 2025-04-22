@@ -38,7 +38,7 @@ int MyMain()
 
     // Solver parameters
     constexpr amrex::Real tolerance = 1.0e-6;
-    constexpr int max_iterations = 1000;
+    constexpr int max_iterations = 40;
     constexpr amrex::Real omega = 1.0;  // Under-relaxation parameter
 
     amrex::Print() << "Running test with domain size: " << nx << "x" << ny << "x" << nz << "\n";

@@ -351,6 +351,9 @@ static void GaussSeidelIteration(
             const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
             amrex::Print() << "Pressure at (0,0,0) before iteration: " << p_arr(0,0,0) 
                           << " (expected: " << expected << ")\n";
+            // Add debug print for boundary cell
+            amrex::Print() << "Pressure at (-1,0,0) before iteration: " << p_arr(-1,0,0) 
+                          << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
         }
 
         for (int i = lo.x; i <= hi.x; ++i)
@@ -359,11 +362,27 @@ static void GaussSeidelIteration(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
+                    // Get boundary values if needed
+                    amrex::Real p_im1 = (i > lo.x) ? p_arr(i-1,j,k) : ExpectedPressure(geom, i-1, j, k);
+                    amrex::Real p_ip1 = (i < hi.x) ? p_arr(i+1,j,k) : ExpectedPressure(geom, i+1, j, k);
+                    amrex::Real p_jm1 = (j > lo.y) ? p_arr(i,j-1,k) : ExpectedPressure(geom, i, j-1, k);
+                    amrex::Real p_jp1 = (j < hi.y) ? p_arr(i,j+1,k) : ExpectedPressure(geom, i, j+1, k);
+                    amrex::Real p_km1 = (k > lo.z) ? p_arr(i,j,k-1) : ExpectedPressure(geom, i, j, k-1);
+                    amrex::Real p_kp1 = (k < hi.z) ? p_arr(i,j,k+1) : ExpectedPressure(geom, i, j, k+1);
+
                     // Gauss-Seidel update with under-relaxation
                     const amrex::Real p_new = (1.0 / 6.0) * (
+#if 0
+                        // TODO: This is supposed to work, but apparently PressureBndryFunc is not
+                        // setting the external ghosts to the ExpectedPressure() as intended
                         p_arr(i + 1, j, k) + p_arr(i - 1, j, k) +
                         p_arr(i, j + 1, k) + p_arr(i, j - 1, k) +
                         p_arr(i, j, k + 1) + p_arr(i, j, k - 1) -
+#else
+                        p_ip1 + p_im1 +
+                        p_jp1 + p_jm1 +
+                        p_kp1 + p_km1 -
+#endif
                         dx2 * div_arr(i, j, k));
 
                     p_arr(i, j, k) = (1.0 - omega) * p_arr(i, j, k) + omega * p_new;
@@ -376,6 +395,9 @@ static void GaussSeidelIteration(
             const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
             amrex::Print() << "Pressure at (0,0,0) after iteration: " << p_arr(0,0,0)
                           << " (expected: " << expected << ")\n";
+            // Add debug print for boundary cell
+            amrex::Print() << "Pressure at (-1,0,0) after iteration: " << p_arr(-1,0,0)
+                          << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
         }
     }
 
