@@ -144,30 +144,26 @@ void InitializeVelocity(
     // For testing, we'll use a field with constant divergence
     const amrex::Real div = 1.0;  // Constant divergence
 
-    for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& u_arr = velocity[U].array(mfi);
-        const auto& v_arr = velocity[V].array(mfi);
-        const auto& w_arr = velocity[W].array(mfi);
-
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-
-        for (int i = lo.x; i <= hi.x; ++i)
+    for (int d = 0; d < 3; ++d) {
+        for (amrex::MFIter mfi(velocity[d]); mfi.isValid(); ++mfi)
         {
-            for (int j = lo.y; j <= hi.y; ++j)
-            {
-                for (int k = lo.z; k <= hi.z; ++k)
-                {
-                    // Set velocities to create constant divergence
-                    const amrex::Real x = geom.CellCenter(i, U);
-                    const amrex::Real y = geom.CellCenter(j, V);
-                    const amrex::Real z = geom.CellCenter(k, W);
+            const amrex::Box& box = mfi.validbox();
+            const auto& vel_arr = velocity[d].array(mfi);
 
-                    u_arr(i, j, k) = div * x / 3.0;
-                    v_arr(i, j, k) = div * y / 3.0;
-                    w_arr(i, j, k) = div * z / 3.0;
+            const auto lo = amrex::lbound(box);
+            const auto hi = amrex::ubound(box);
+
+            for (int i = lo.x; i <= hi.x; ++i)
+            {
+                for (int j = lo.y; j <= hi.y; ++j)
+                {
+                    for (int k = lo.z; k <= hi.z; ++k)
+                    {
+                        // Find the x-, y-, or z-coordinate of given face
+                        const int ijk = (d == U) ? i : (d == V) ? j : k;
+                        const amrex::Real xyz = geom.LoEdge(ijk, d);
+                        vel_arr(i, j, k) = div * xyz / 3.0;
+                    }
                 }
             }
         }
