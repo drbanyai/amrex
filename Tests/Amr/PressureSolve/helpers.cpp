@@ -50,11 +50,15 @@ public:
         const auto lo = amrex::lbound(bx);
         const auto hi = amrex::ubound(bx);
         const auto arr = data.array();
+        const amrex::Box& valid_box = geom.Domain();
 
         amrex::ParallelFor(bx, numcomp,
             [=] AMREX_GPU_DEVICE (int i, int j, int k, int n) noexcept
             {
-                arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k);
+                // Only operate on external ghost cells
+                if (!valid_box.contains(i,j,k)) {
+                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k);
+                }
             });
     }
 };
