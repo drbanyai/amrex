@@ -63,7 +63,8 @@ static void GaussSeidelIteration(
     amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
-    amrex::Real omega);
+    amrex::Real omega,
+    int iteration);
 
 static amrex::Real ComputeResidual(
     const amrex::MultiFab& pressure,
@@ -196,7 +197,7 @@ void SolvePressure(
 
     while (residual > tolerance && iteration < max_iterations)
     {
-        GaussSeidelIteration(pressure, divergence, geom, omega);
+        GaussSeidelIteration(pressure, divergence, geom, omega, iteration);
         residual = ComputeResidual(pressure, divergence, geom);
         iteration++;
 
@@ -312,7 +313,8 @@ static void GaussSeidelIteration(
     amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
-    amrex::Real omega)
+    amrex::Real omega,
+    int iteration)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dx2 = dx * dx;
@@ -322,7 +324,6 @@ static void GaussSeidelIteration(
     
     // Set Dirichlet boundary conditions based on expected solution
     for (int n = 0; n < 1; ++n) {
-        // For each direction, set the boundary condition type and value
         for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
             bc[n].setLo(dir, amrex::BCType::ext_dir);  // External Dirichlet
             bc[n].setHi(dir, amrex::BCType::ext_dir);  // External Dirichlet
@@ -349,10 +350,10 @@ static void GaussSeidelIteration(
         // Print pressure at (0,0,0) before iteration
         if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
             const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
-            amrex::Print() << "Pressure at (0,0,0) before iteration: " << p_arr(0,0,0) 
+            amrex::Print() << "Iteration " << iteration << " - Pressure at (0,0,0) before: " << p_arr(0,0,0) 
                           << " (expected: " << expected << ")\n";
             // Add debug print for boundary cell
-            amrex::Print() << "Pressure at (-1,0,0) before iteration: " << p_arr(-1,0,0) 
+            amrex::Print() << "Iteration " << iteration << " - Pressure at (-1,0,0) before: " << p_arr(-1,0,0) 
                           << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
         }
 
@@ -393,10 +394,10 @@ static void GaussSeidelIteration(
         // Print pressure at (0,0,0) after iteration
         if (lo.x == 0 && lo.y == 0 && lo.z == 0) {
             const amrex::Real expected = ExpectedPressure(geom, 0, 0, 0);
-            amrex::Print() << "Pressure at (0,0,0) after iteration: " << p_arr(0,0,0)
+            amrex::Print() << "Iteration " << iteration << " - Pressure at (0,0,0) after: " << p_arr(0,0,0)
                           << " (expected: " << expected << ")\n";
             // Add debug print for boundary cell
-            amrex::Print() << "Pressure at (-1,0,0) after iteration: " << p_arr(-1,0,0)
+            amrex::Print() << "Iteration " << iteration << " - Pressure at (-1,0,0) after: " << p_arr(-1,0,0)
                           << " (expected: " << ExpectedPressure(geom, -1, 0, 0) << ")\n";
         }
     }
