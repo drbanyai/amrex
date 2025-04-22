@@ -31,14 +31,15 @@ int main(int argc, char** argv)
 int MyMain()
 {
     // Domain setup
-    constexpr int nx = 4;
-    constexpr int ny = 4;
-    constexpr int nz = 4;
+    constexpr int multiplier = 16;
+    constexpr int nx = multiplier ;
+    constexpr int ny = multiplier;
+    constexpr int nz = multiplier;
     constexpr double dx = 1.0;  // meters
 
     // Solver parameters
     constexpr amrex::Real tolerance = 1.0e-6;
-    constexpr int max_iterations = 40;
+    constexpr int max_iterations = 10*multiplier;
     constexpr amrex::Real omega = 1.0;  // Under-relaxation parameter
 
     amrex::Print() << "Running test with domain size: " << nx << "x" << ny << "x" << nz << "\n";

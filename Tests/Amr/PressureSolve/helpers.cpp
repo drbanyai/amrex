@@ -26,11 +26,34 @@ static amrex::Real ExpectedPressure(
     const int j,
     const int k)
 {
+    // For a dipole in free space, the pressure is given by the fundamental solution
+    // p = (1/4π) * (r·p)/r³ where p is the dipole moment
     const amrex::Real x = geom.CellCenter(i, U);
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
-    constexpr amrex::Real coeff = 1.0/6.0;
-    return coeff * (x * x + y * y + z * z);
+    
+    // Get domain center
+    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
+    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
+    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
+    
+    // Calculate distance from center
+    const amrex::Real dx = x - center_x;
+    const amrex::Real dy = y - center_y;
+    const amrex::Real dz = z - center_z;
+    const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
+    const amrex::Real r = std::sqrt(r2);
+    
+    // Dipole moment is in x-direction with unit strength
+    const amrex::Real p_x = 1.0;
+    const amrex::Real p_y = 0.0;
+    const amrex::Real p_z = 0.0;
+    
+    // Calculate dot product of r and p
+    const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
+    
+    // Fundamental solution for dipole
+    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
 }
 
 class PressureBndryFunc
@@ -88,7 +111,7 @@ amrex::Geometry DefineGeometry(int nx, int ny, int nz, double dx)
     const amrex::RealBox real_box({0.0, 0.0, 0.0},
                                  {nx * dx, ny * dx, nz * dx});
     constexpr amrex::CoordSys::CoordType coord = amrex::CoordSys::CoordType::cartesian;
-    const amrex::IntArray is_periodic{1, 1, 1};  // Periodic in all directions
+    const amrex::IntArray is_periodic{0, 0, 0};  // Non-periodic in all directions
 
     const amrex::Box domain(amrex::IntVect(0, 0, 0),
                            amrex::IntVect(nx - 1, ny - 1, nz - 1));
@@ -202,7 +225,7 @@ void SolvePressure(
         residual = ComputeResidual(pressure, divergence, geom);
         iteration++;
 
-        if ((max_iterations < 100) || (iteration % 100 == 0))
+        if ((max_iterations < 100) || (iteration % 10 == 0))
         {
             amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
         }
@@ -216,11 +239,6 @@ void CheckResults(
     const std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom)
 {
-    // For our test case with constant divergence, the analytic solution is
-    // p = (div/6) * (x^2 + y^2 + z^2) + C
-    const amrex::Real div = 1.0;  // Constant divergence from initialization
-    const amrex::Real expected_coeff = div / 6.0;
-
     amrex::Real max_error = 0.0;
     amrex::Real avg_error = 0.0;
     amrex::Real volume = 0.0;
@@ -239,11 +257,7 @@ void CheckResults(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    const amrex::Real x = geom.CellCenter(i, U);
-                    const amrex::Real y = geom.CellCenter(j, V);
-                    const amrex::Real z = geom.CellCenter(k, W);
-
-                    const amrex::Real expected = expected_coeff * (x * x + y * y + z * z);
+                    const amrex::Real expected = ExpectedPressure(geom, i, j, k);
                     const amrex::Real error = std::abs(p_arr(i, j, k) - expected);
 
                     max_error = std::max(max_error, error);
@@ -323,7 +337,7 @@ static void GaussSeidelIteration(
     // Define boundary conditions
     amrex::Vector<amrex::BCRec> bc(1);
     
-    // Set Dirichlet boundary conditions based on expected solution
+    // Set Dirichlet boundary conditions based on analytic solution
     for (int n = 0; n < 1; ++n) {
         for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
             bc[n].setLo(dir, amrex::BCType::ext_dir);  // External Dirichlet
@@ -369,22 +383,6 @@ static void GaussSeidelIteration(
                     p_arr(i, j, k) = (1.0 - omega) * p_arr(i, j, k) + omega * p_new;
                 }
             }
-        }
-
-        // Print pressure at a cell near the center
-        const auto& domain = geom.Domain();
-        const int center_i = domain.length(0) / 2;
-        const int center_j = domain.length(1) / 2;
-        const int center_k = domain.length(2) / 2;
-
-        if (lo.x <= center_i && hi.x >= center_i &&
-            lo.y <= center_j && hi.y >= center_j &&
-            lo.z <= center_k && hi.z >= center_k) {
-            const amrex::Real expected = ExpectedPressure(geom, center_i, center_j, center_k);
-            amrex::Print() << "Pressure at center cell (" 
-                          << center_i << "," << center_j << "," << center_k << "): " 
-                          << p_arr(center_i,center_j,center_k)
-                          << " (expected: " << expected << ")\n";
         }
     }
 
