@@ -44,8 +44,12 @@ static amrex::Real ExpectedPressure(
     const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
     const amrex::Real r = std::sqrt(r2);
     
-    // Dipole moment is in x-direction with unit strength
-    const amrex::Real p_x = 1.0;
+    // Calculate dipole strength from our velocity field
+    // We have a velocity difference of 2.0 m/s over a distance of 1.0 m
+    const amrex::Real dipole_strength = 2.0;  // m²/s
+    
+    // Dipole moment is in x-direction with our calculated strength
+    const amrex::Real p_x = dipole_strength;
     const amrex::Real p_y = 0.0;
     const amrex::Real p_z = 0.0;
     
@@ -200,6 +204,63 @@ void InitializeVelocity(
     }
 }
 
+void SamplePressureAlongLine(
+    const amrex::MultiFab& pressure,
+    const amrex::Geometry& geom,
+    const std::string& filename)
+{
+    // Get domain center
+    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
+    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
+    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
+    
+    // Find the cell indices closest to center
+    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
+    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
+    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
+    
+    // Open file for writing
+    std::ofstream outfile(filename);
+    outfile << "# x p(x) p_expected(x)\n";
+    
+    // Sample along x-axis through center
+    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& p_arr = pressure.array(mfi);
+        
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+        
+        // Only process if this box contains our line
+        if (lo.y <= center_j && hi.y >= center_j &&
+            lo.z <= center_k && hi.z >= center_k)
+        {
+            for (int i = lo.x; i <= hi.x; ++i)
+            {
+                const amrex::Real x = geom.CellCenter(i, U);
+                const amrex::Real p = p_arr(i, center_j, center_k);
+                const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k);
+                outfile << x << ", " << p << ", " << p_expected << "\n";
+            }
+        }
+    }
+    outfile.close();
+    
+    // Create gnuplot script
+    std::ofstream script("plot_pressure.gp");
+    script << "set terminal png\n";
+    script << "set output 'pressure_profile.png'\n";
+    script << "set xlabel 'x'\n";
+    script << "set ylabel 'pressure'\n";
+    script << "plot '" << filename << "' using 1:2 title 'computed' with lines,\\\n";
+    script << "     '" << filename << "' using 1:3 title 'expected' with lines\n";
+    script.close();
+    
+    // Run gnuplot
+    std::system("gnuplot plot_pressure.gp");
+}
+
 void SolvePressure(
     amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
@@ -232,6 +293,9 @@ void SolvePressure(
     }
 
     amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
+    
+    // Sample pressure along center line and create plot
+    SamplePressureAlongLine(pressure, geom, "pressure_profile.dat");
 }
 
 void CheckResults(
