@@ -50,8 +50,8 @@ static amrex::Real ExpectedPressure(
     const amrex::Real r = std::sqrt(r2);
     
     // Calculate dipole strength from our velocity field
-    // We have a velocity difference of 2.0 m/s over a distance of 1.0 m
-    const amrex::Real dipole_strength = 2.0;  // m²/s
+    // We have a velocity difference of 2.0 m/s over a distance of dx_cell
+    const amrex::Real dipole_strength = 2.0 * dx_cell;  // m²/s
     
     // Dipole moment is in x-direction with our calculated strength
     const amrex::Real p_x = dipole_strength;
@@ -61,8 +61,8 @@ static amrex::Real ExpectedPressure(
     // Calculate dot product of r and p
     const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
     
-    // Modification of the fundamental solution for dipole, which better matches the results
-    return (1.0/(4.0*M_PI)) * std::abs(r_dot_p) / (r*r*r*r + 1e-6);
+    // Fundamental solution for dipole
+    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
 }
 
 class PressureBndryFunc
