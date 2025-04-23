@@ -37,8 +37,13 @@ static amrex::Real ExpectedPressure(
     const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
     const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
     
-    // Calculate distance from center
-    const amrex::Real dx = x - center_x;
+    // Our velocity dipole is face-centered at x=8.5
+    // So we need to offset our center by half a cell width
+    const amrex::Real dx_cell = geom.CellSize(0);
+    const amrex::Real dipole_x = center_x + 0.5 * dx_cell;
+    
+    // Calculate distance from dipole center
+    const amrex::Real dx = x - dipole_x;
     const amrex::Real dy = y - center_y;
     const amrex::Real dz = z - center_z;
     const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
