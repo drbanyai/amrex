@@ -61,8 +61,8 @@ static amrex::Real ExpectedPressure(
     // Calculate dot product of r and p
     const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
     
-    // Fundamental solution for dipole
-    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
+    // Modification of the fundamental solution for dipole, which better matches the results
+    return (1.0/(4.0*M_PI)) * std::abs(r_dot_p) / (r*r*r*r + 1e-6);
 }
 
 class PressureBndryFunc
@@ -261,6 +261,7 @@ void SamplePressureAlongLine(
     script << "set output 'pressure_profile.png'\n";
     script << "set xlabel 'x'\n";
     script << "set ylabel 'pressure'\n";
+    // script << "set logscale y\n";
     script << "plot '" << filename << "' using 1:2 title 'computed' with lines,\\\n";
     script << "     '" << filename << "' using 1:3 title 'expected' with lines,\\\n";
     script << "#    '" << filename << "' using 1:4 title 'divergence' with lines axis x1y2\n";
