@@ -20,6 +20,40 @@ static constexpr int W = 2;
 /*--------------------------------------------------------------------
   private free function declarations
   --------------------------------------------------------------------*/
+static amrex::Real CalculateDipolePressure(
+    const amrex::Real x,
+    const amrex::Real y,
+    const amrex::Real z,
+    const amrex::Real dipole_x,
+    const amrex::Real dipole_y,
+    const amrex::Real dipole_z,
+    const amrex::Real dipole_strength,
+    const int direction)
+{
+    const amrex::Real dx = x - dipole_x;
+    const amrex::Real dy = y - dipole_y;
+    const amrex::Real dz = z - dipole_z;
+    const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
+    const amrex::Real r = std::sqrt(r2);
+    
+    amrex::Real p_x = 0.0;
+    amrex::Real p_y = 0.0;
+    amrex::Real p_z = 0.0;
+    
+    // Set dipole moment based on direction
+    switch (direction) {
+        case 0: p_x = dipole_strength; break;  // +x
+        case 1: p_x = -dipole_strength; break; // -x
+        case 2: p_y = dipole_strength; break;  // +y
+        case 3: p_y = -dipole_strength; break; // -y
+        case 4: p_z = dipole_strength; break;  // +z
+        case 5: p_z = -dipole_strength; break; // -z
+    }
+    
+    const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
+    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
+}
+
 static amrex::Real ExpectedPressure(
     const amrex::Geometry& geom,
     const int i,
@@ -37,32 +71,24 @@ static amrex::Real ExpectedPressure(
     const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
     const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
     
-    // Our velocity dipole is face-centered at x=8.5
+    // Our velocity dipoles are face-centered at x=8.5
     // So we need to offset our center by half a cell width
     const amrex::Real dx_cell = geom.CellSize(0);
     const amrex::Real dipole_x = center_x + 0.5 * dx_cell;
     
-    // Calculate distance from dipole center
-    const amrex::Real dx = x - dipole_x;
-    const amrex::Real dy = y - center_y;
-    const amrex::Real dz = z - center_z;
-    const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
-    const amrex::Real r = std::sqrt(r2);
+    // Calculate pressure from each dipole
+    amrex::Real total_pressure = 0.0;
     
-    // Calculate dipole strength from our velocity field
-    // We have a velocity difference of 2.0 m/s over a distance of dx_cell
-    const amrex::Real dipole_strength = 2.0 * dx_cell;  // m²/s
+    // Dipole at center (strength 2.0 m/s * dx in +x direction)
+    total_pressure += CalculateDipolePressure(x, y, z, dipole_x, center_y, center_z, 2.0 * dx_cell, 0);
     
-    // Dipole moment is in x-direction with our calculated strength
-    const amrex::Real p_x = dipole_strength;
-    const amrex::Real p_y = 0.0;
-    const amrex::Real p_z = 0.0;
+    // Dipole at left of center (strength 1.0 m/s * dx in -x direction)
+    total_pressure += CalculateDipolePressure(x, y, z, dipole_x - dx_cell, center_y, center_z, 1.0 * dx_cell, 1);
     
-    // Calculate dot product of r and p
-    const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
+    // Dipole at right of center (strength 1.0 m/s * dx in -x direction)
+    total_pressure += CalculateDipolePressure(x, y, z, dipole_x + dx_cell, center_y, center_z, 1.0 * dx_cell, 1);
     
-    // Fundamental solution for dipole
-    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
+    return total_pressure;
 }
 
 class PressureBndryFunc
