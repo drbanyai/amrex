@@ -206,6 +206,7 @@ void InitializeVelocity(
 
 void SamplePressureAlongLine(
     const amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
     const std::string& filename)
 {
@@ -221,13 +222,14 @@ void SamplePressureAlongLine(
     
     // Open file for writing
     std::ofstream outfile(filename);
-    outfile << "# x p(x) p_expected(x)\n";
+    outfile << "# x p(x) p_expected(x) div(x)\n";
     
     // Sample along x-axis through center
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
     {
         const amrex::Box& box = mfi.validbox();
         const auto& p_arr = pressure.array(mfi);
+        const auto& div_arr = divergence.array(mfi);
         
         const auto lo = amrex::lbound(box);
         const auto hi = amrex::ubound(box);
@@ -241,7 +243,8 @@ void SamplePressureAlongLine(
                 const amrex::Real x = geom.CellCenter(i, U);
                 const amrex::Real p = p_arr(i, center_j, center_k);
                 const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k);
-                outfile << x << ", " << p << ", " << p_expected << "\n";
+                const amrex::Real div = div_arr(i, center_j, center_k);
+                outfile << x << ", " << p << ", " << p_expected << ", " << div << "\n";
             }
         }
     }
@@ -254,7 +257,8 @@ void SamplePressureAlongLine(
     script << "set xlabel 'x'\n";
     script << "set ylabel 'pressure'\n";
     script << "plot '" << filename << "' using 1:2 title 'computed' with lines,\\\n";
-    script << "     '" << filename << "' using 1:3 title 'expected' with lines\n";
+    script << "     '" << filename << "' using 1:3 title 'expected' with lines,\\\n";
+    script << "#    '" << filename << "' using 1:4 title 'divergence' with lines axis x1y2\n";
     script.close();
     
     // Run gnuplot
@@ -295,7 +299,7 @@ void SolvePressure(
     amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
     
     // Sample pressure along center line and create plot
-    SamplePressureAlongLine(pressure, geom, "pressure_profile.dat");
+    SamplePressureAlongLine(pressure, divergence, geom, "pressure_profile.dat");
 }
 
 void CheckResults(
@@ -360,6 +364,9 @@ static void ComputeDivergence(
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dxinv = 1.0 / dx;
 
+    // Track maximum divergence for diagnostics
+    amrex::Real max_div = 0.0;
+
     for (amrex::MFIter mfi(divergence); mfi.isValid(); ++mfi)
     {
         const amrex::Box& box = mfi.validbox();
@@ -382,10 +389,16 @@ static void ComputeDivergence(
                         u_arr(i + 1, j, k) - u_arr(i, j, k) +
                         v_arr(i, j + 1, k) - v_arr(i, j, k) +
                         w_arr(i, j, k + 1) - w_arr(i, j, k));
+                    
+                    max_div = std::max(max_div, std::abs(div_arr(i, j, k)));
                 }
             }
         }
     }
+
+    // Print maximum divergence for diagnostics
+    amrex::ParallelDescriptor::ReduceRealMax(max_div);
+    amrex::Print() << "Maximum divergence: " << max_div << "\n";
 }
 
 static void GaussSeidelIteration(
