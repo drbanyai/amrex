@@ -214,7 +214,8 @@ void InitializeVelocity(
         const amrex::Box& box = mfi.validbox();
         const auto& u_arr = velocity[U].array(mfi);
         if (box.contains(i_face, j_face, k_face)) {
-            u_arr(i_face, j_face, k_face) = 1.0;
+            const amrex::Real dx = geom.CellSize(0);
+            u_arr(i_face, j_face, k_face) = 1.0 / (dx * dx);
         }
     }
 
@@ -279,10 +280,11 @@ void SamplePressureAlongLine(
     script << "set ylabel 'pressure (Pa?)'\n";
     script << "set y2label 'divergence'\n";
     // script << "set logscale y\n";
+    script << "set ytics nomirror\n";
     script << "set y2tics\n";
     script << "set xzeroaxis\n";
-    script << "plot '" << filename << "' using 1:2 title 'computed' with lines,\\\n";
-    script << "     '" << filename << "' using 1:3 title 'expected' with lines,\\\n";
+    script << "plot '" << filename << "' using 1:2 title 'computed' with linespoints,\\\n";
+    script << "     '" << filename << "' using 1:3 title 'expected' with linespoints,\\\n";
     script << "     '" << filename << "' using 1:4 title 'divergence' with linespoints axis x1y2\n";
     script.close();
     
@@ -373,7 +375,7 @@ void CheckResults(
     amrex::Print() << "  Maximum error: " << max_error << "\n";
     amrex::Print() << "  Average error: " << avg_error << "\n";
 
-    const amrex::Real error_tolerance = 1.0;
+    const amrex::Real error_tolerance = 1.0E-2;
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(avg_error <= error_tolerance,
         "Average pressure error " + std::to_string(avg_error) +
         " exceeds maximum allowed value of " + std::to_string(error_tolerance));

@@ -35,8 +35,7 @@ int MyMain()
     constexpr int nx = multiplier ;
     constexpr int ny = multiplier;
     constexpr int nz = multiplier;
-    constexpr double dx = 1.0;  // meters
-    //constexpr double dx = 0.5;  // meters
+    constexpr double dx = 1.0/multiplier;  // meters
 
     // Solver parameters
     constexpr amrex::Real tolerance = 1.0e-6;
