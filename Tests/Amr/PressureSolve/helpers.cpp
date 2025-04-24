@@ -79,15 +79,13 @@ static amrex::Real ExpectedPressure(
     const amrex::Real h = geom.CellSize(0); // Assume cubic cells
     const amrex::Real avg_inv_r = 1.516386 / h; // <1/r> over the cube
 
-    const amrex::Real eps = 1e-12; // avoid division by zero
-    amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z) + eps);
-    amrex::Real dist2 = std::sqrt((x - r2_x)*(x - r2_x) + (y - r2_y)*(y - r2_y) + (z - r2_z)*(z - r2_z) + eps);
+    const amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z));
+    const amrex::Real dist2 = std::sqrt((x - r2_x)*(x - r2_x) + (y - r2_y)*(y - r2_y) + (z - r2_z)*(z - r2_z));
 
-    const bool at_r1 = (i == i_face-1) && (j == j_face) && (k == k_face);
-    const bool at_r2 = (i == i_face)   && (j == j_face) && (k == k_face);
-
-    const amrex::Real inv_dist1 = at_r1 ? avg_inv_r : 1.0/dist1;
-    const amrex::Real inv_dist2 = at_r2 ? avg_inv_r : 1.0/dist2;
+    // Use cell-averaged inverse distance if the evaluation point coincides with the source, otherwise use pointwise inverse distance
+    const amrex::Real tol = 1e-10;
+    const amrex::Real inv_dist1 = (dist1 < tol) ? avg_inv_r : 1.0/dist1;
+    const amrex::Real inv_dist2 = (dist2 < tol) ? avg_inv_r : 1.0/dist2;
     const amrex::Real p = -1.0/(4.0*M_PI) * (inv_dist1 - inv_dist2);
     return p;
 }
