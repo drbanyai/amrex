@@ -277,17 +277,23 @@ void SamplePressureAlongLine(
     script << "set terminal png size 800,600\n";
     script << "set output 'pressure_profile.png'\n";
     script << "set xlabel 'x (m)'\n";
-    script << "set ylabel 'pressure (Pa?)'\n";
-    script << "set y2label 'divergence'\n";
+    script << "set ylabel 'Pressure (Pa?)'\n";
+    script << "set y2label 'Divergence'\n";
     // script << "set logscale y\n";
     script << "set ytics nomirror\n";
     script << "set y2tics\n";
     script << "set xzeroaxis\n";
-    script << "plot '" << filename << "' using 1:2 title 'computed' with linespoints,\\\n";
-    script << "     '" << filename << "' using 1:3 title 'expected' with linespoints,\\\n";
+    script << "plot '" << filename << "' using 1:2 title 'Computed' with linespoints,\\\n";
+    script << "     '" << filename << "' using 1:3 title 'Expected' with linespoints,\\\n";
     script << "     '" << filename << "' using 1:4 title 'divergence' with linespoints axis x1y2\n";
+    script << "\n";
+    script << "set output 'pressure_error.png'\n";
+    script << "set xlabel 'x (m)'\n";
+    script << "set ylabel 'Pressure Error (Pa?)'\n";
+    script << "set xzeroaxis\n";
+    script << "plot '" << filename << "' using 1:($2-$3) title 'computed - expected' with linespoints\n";
     script.close();
-    
+
     // Run gnuplot
     std::system("gnuplot plot_pressure.gp");
 }
