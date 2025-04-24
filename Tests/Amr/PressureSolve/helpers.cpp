@@ -236,6 +236,7 @@ void SamplePressureAlongLine(
     const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
     const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
     const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
+    const amrex::Real dx = geom.CellSize(0);
     
     // Find the cell indices closest to center
     const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
@@ -244,7 +245,7 @@ void SamplePressureAlongLine(
     
     // Open file for writing
     std::ofstream outfile(filename);
-    outfile << "# x p(x) p_expected(x) div(x)\n";
+    outfile << "# x, p(x), p_expected(x), cell-integrated divergence\n";
     
     // Sample along x-axis through center
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
@@ -266,7 +267,7 @@ void SamplePressureAlongLine(
                 const amrex::Real p = p_arr(i, center_j, center_k);
                 const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k, i_face, j_face, k_face);
                 const amrex::Real div = div_arr(i, center_j, center_k);
-                outfile << x << ", " << p << ", " << p_expected << ", " << div << "\n";
+                outfile << x << ", " << p << ", " << p_expected << ", " << div*dx*dx*dx << "\n";
             }
         }
     }
@@ -278,20 +279,20 @@ void SamplePressureAlongLine(
     script << "set output 'pressure_profile.png'\n";
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure (Pa?)'\n";
-    script << "set y2label 'Divergence'\n";
+    script << "set y2label 'Cell-Integrated Divergence'\n";
     // script << "set logscale y\n";
     script << "set ytics nomirror\n";
     script << "set y2tics\n";
     script << "set xzeroaxis\n";
     script << "plot '" << filename << "' using 1:2 title 'Computed' with linespoints,\\\n";
     script << "     '" << filename << "' using 1:3 title 'Expected' with linespoints,\\\n";
-    script << "     '" << filename << "' using 1:4 title 'divergence' with linespoints axis x1y2\n";
+    script << "     '" << filename << "' using 1:4 title 'Divergence' with linespoints axis x1y2\n";
     script << "\n";
     script << "set output 'pressure_error.png'\n";
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (Pa?)'\n";
     script << "set xzeroaxis\n";
-    script << "plot '" << filename << "' using 1:($2-$3) title 'computed - expected' with linespoints\n";
+    script << "plot '" << filename << "' using 1:($2-$3) title 'Computed - Expected' with linespoints\n";
     script.close();
 
     // Run gnuplot
