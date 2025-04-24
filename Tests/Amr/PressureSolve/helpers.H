@@ -30,22 +30,25 @@ void DefineFABs(
 // Initialization
 void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom);
+    const amrex::Geometry& geom,
+    int i_face, int j_face, int k_face);
 
 // Main pressure solver function
 void SolvePressure(
     amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom,
-    amrex::Real tolerance = 1.0e-6,
-    int max_iterations = 1000,
-    amrex::Real omega = 1.0);
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega,
+    int i_face, int j_face, int k_face);
 
 // Verification
 void CheckResults(
     const amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom);
+    const amrex::Geometry& geom,
+    int i_face, int j_face, int k_face);
 
 /*--------------------------------------------------------------------
   End of file

@@ -59,14 +59,19 @@ int MyMain()
     std::array<amrex::MultiFab, 3> velocity;
     DefineFABs(pressure, velocity, ba, dm);
 
+    // Define the nonzero face indices (hardcoded for this test)
+    const int i_face = nx/2;
+    const int j_face = ny/2;
+    const int k_face = nz/2;
+
     // Initialize velocity field
-    InitializeVelocity(velocity, geom);
+    InitializeVelocity(velocity, geom, i_face, j_face, k_face);
 
     // Solve for pressure
-    SolvePressure(pressure, velocity, geom, tolerance, max_iterations, omega);
+    SolvePressure(pressure, velocity, geom, tolerance, max_iterations, omega, i_face, j_face, k_face);
 
     // Verify results
-    CheckResults(pressure, velocity, geom);
+    CheckResults(pressure, velocity, geom, i_face, j_face, k_face);
 
     return 0;
 }

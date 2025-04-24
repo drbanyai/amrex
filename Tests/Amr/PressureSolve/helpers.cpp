@@ -58,7 +58,8 @@ static amrex::Real ExpectedPressure(
     const amrex::Geometry& geom,
     const int i,
     const int j,
-    const int k)
+    const int k,
+    int i_face, int j_face, int k_face)
 {
     // Analytic solution for a dipole in infinite domain:
     // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
@@ -66,20 +67,13 @@ static amrex::Real ExpectedPressure(
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
 
-    // Get domain center
-    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
-    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
-    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
-    const amrex::Real dx_cell = geom.CellSize(0);
-
-    // The nonzero x-face is at (center_i+1, center_j, center_k), between two cells
-    // Compute the positions of the centers of these two adjacent cells
-    const amrex::Real r1_x = center_x; // cell to the left
-    const amrex::Real r2_x = center_x + dx_cell; // cell to the right
-    const amrex::Real r1_y = center_y;
-    const amrex::Real r2_y = center_y;
-    const amrex::Real r1_z = center_z;
-    const amrex::Real r2_z = center_z;
+    // The nonzero x-face is at (i_face, j_face, k_face), between cells (i_face-1, j_face, k_face) and (i_face, j_face, k_face)
+    const amrex::Real r1_x = geom.CellCenter(i_face-1, U); // cell to the left
+    const amrex::Real r2_x = geom.CellCenter(i_face, U);   // cell to the right
+    const amrex::Real r1_y = geom.CellCenter(j_face, V);
+    const amrex::Real r2_y = geom.CellCenter(j_face, V);
+    const amrex::Real r1_z = geom.CellCenter(k_face, W);
+    const amrex::Real r2_z = geom.CellCenter(k_face, W);
 
     // Evaluate the Green's function difference
     const amrex::Real eps = 1e-12; // avoid division by zero
@@ -92,6 +86,8 @@ static amrex::Real ExpectedPressure(
 class PressureBndryFunc
 {
 public:
+    PressureBndryFunc(int i_face_, int j_face_, int k_face_)
+        : i_face(i_face_), j_face(j_face_), k_face(k_face_) {}
     void operator()(
         amrex::Box const& bx,
         amrex::FArrayBox& data,
@@ -113,10 +109,12 @@ public:
             {
                 // Only operate on external ghost cells
                 if (!valid_box.contains(i,j,k)) {
-                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k);
+                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face);
                 }
             });
     }
+private:
+    int i_face, j_face, k_face;
 };
 
 static void GaussSeidelIteration(
@@ -124,7 +122,8 @@ static void GaussSeidelIteration(
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
     amrex::Real omega,
-    int iteration);
+    int iteration,
+    int i_face, int j_face, int k_face);
 
 static amrex::Real ComputeResidual(
     const amrex::MultiFab& pressure,
@@ -194,30 +193,21 @@ void DefineFABs(
 
 void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom)
+    const amrex::Geometry& geom,
+    int i_face, int j_face, int k_face)
 {
     // Set all velocities to zero
     for (int d = 0; d < 3; ++d) {
         velocity[d].setVal(0.0);
     }
 
-    // Set a single nonzero x-face at the center of the domain
-    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
-    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
-    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
-
-    // Find the i, j, k index of the cell-centered grid closest to the domain center
-    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
-    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
-    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
-
-    // The MAC grid's x-face at (center_i+1, center_j, center_k) is between cells (center_i, center_j, center_k) and (center_i+1, center_j, center_k)
+    // Set a single nonzero x-face at the specified face indices
     for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
     {
         const amrex::Box& box = mfi.validbox();
         const auto& u_arr = velocity[U].array(mfi);
-        if (box.contains(center_i+1, center_j, center_k)) {
-            u_arr(center_i+1, center_j, center_k) = 1.0;
+        if (box.contains(i_face, j_face, k_face)) {
+            u_arr(i_face, j_face, k_face) = 1.0;
         }
     }
 
@@ -231,7 +221,8 @@ void SamplePressureAlongLine(
     const amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
-    const std::string& filename)
+    const std::string& filename,
+    int i_face, int j_face, int k_face)
 {
     // Get domain center
     const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
@@ -265,7 +256,7 @@ void SamplePressureAlongLine(
             {
                 const amrex::Real x = geom.CellCenter(i, U);
                 const amrex::Real p = p_arr(i, center_j, center_k);
-                const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k);
+                const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k, i_face, j_face, k_face);
                 const amrex::Real div = div_arr(i, center_j, center_k);
                 outfile << x << ", " << p << ", " << p_expected << ", " << div << "\n";
             }
@@ -295,7 +286,8 @@ void SolvePressure(
     const amrex::Geometry& geom,
     amrex::Real tolerance,
     int max_iterations,
-    amrex::Real omega)
+    amrex::Real omega,
+    int i_face, int j_face, int k_face)
 {
     // Allocate and compute divergence
     amrex::MultiFab divergence(pressure.boxArray(), pressure.DistributionMap(), 1, 0);
@@ -310,7 +302,7 @@ void SolvePressure(
 
     while (residual > tolerance && iteration < max_iterations)
     {
-        GaussSeidelIteration(pressure, divergence, geom, omega, iteration);
+        GaussSeidelIteration(pressure, divergence, geom, omega, iteration, i_face, j_face, k_face);
         residual = ComputeResidual(pressure, divergence, geom);
         iteration++;
 
@@ -323,13 +315,14 @@ void SolvePressure(
     amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
     
     // Sample pressure along center line and create plot
-    SamplePressureAlongLine(pressure, divergence, geom, "pressure_profile.dat");
+    SamplePressureAlongLine(pressure, divergence, geom, "pressure_profile.dat", i_face, j_face, k_face);
 }
 
 void CheckResults(
     const amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom)
+    const amrex::Geometry& geom,
+    int i_face, int j_face, int k_face)
 {
     amrex::Real max_error = 0.0;
     amrex::Real avg_error = 0.0;
@@ -349,7 +342,7 @@ void CheckResults(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    const amrex::Real expected = ExpectedPressure(geom, i, j, k);
+                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face);
                     const amrex::Real error = std::abs(p_arr(i, j, k) - expected);
 
                     max_error = std::max(max_error, error);
@@ -430,7 +423,8 @@ static void GaussSeidelIteration(
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
     amrex::Real omega,
-    int iteration)
+    int iteration,
+    int i_face, int j_face, int k_face)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dx2 = dx * dx;
@@ -447,7 +441,7 @@ static void GaussSeidelIteration(
     }
 
     // Create boundary condition functor
-    PressureBndryFunc pbf;
+    PressureBndryFunc pbf(i_face, j_face, k_face);
     amrex::PhysBCFunct<PressureBndryFunc> physbc(geom, bc, pbf);
 
     // Fill ghost cells with boundary conditions
