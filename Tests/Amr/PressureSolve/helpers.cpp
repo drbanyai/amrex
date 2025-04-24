@@ -60,35 +60,33 @@ static amrex::Real ExpectedPressure(
     const int j,
     const int k)
 {
-    // For a dipole in free space, the pressure is given by the fundamental solution
-    // p = (1/4π) * (r·p)/r³ where p is the dipole moment
+    // Analytic solution for a dipole in infinite domain:
+    // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
     const amrex::Real x = geom.CellCenter(i, U);
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
-    
+
     // Get domain center
     const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
     const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
     const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
-    
-    // Our velocity dipoles are face-centered at x=8.5
-    // So we need to offset our center by half a cell width
     const amrex::Real dx_cell = geom.CellSize(0);
-    const amrex::Real dipole_x = center_x + 0.5 * dx_cell;
-    
-    // Calculate pressure from each dipole
-    amrex::Real total_pressure = 0.0;
-    
-    // Dipole at center (strength 2.0 m/s * dx in +x direction)
-    total_pressure += CalculateDipolePressure(x, y, z, dipole_x, center_y, center_z, 2.0 * dx_cell, 0);
-    
-    // Dipole at left of center (strength 1.0 m/s * dx in -x direction)
-    total_pressure += CalculateDipolePressure(x, y, z, dipole_x - dx_cell, center_y, center_z, 1.0 * dx_cell, 1);
-    
-    // Dipole at right of center (strength 1.0 m/s * dx in -x direction)
-    total_pressure += CalculateDipolePressure(x, y, z, dipole_x + dx_cell, center_y, center_z, 1.0 * dx_cell, 1);
-    
-    return total_pressure;
+
+    // The nonzero x-face is at (center_i+1, center_j, center_k), between two cells
+    // Compute the positions of the centers of these two adjacent cells
+    const amrex::Real r1_x = center_x; // cell to the left
+    const amrex::Real r2_x = center_x + dx_cell; // cell to the right
+    const amrex::Real r1_y = center_y;
+    const amrex::Real r2_y = center_y;
+    const amrex::Real r1_z = center_z;
+    const amrex::Real r2_z = center_z;
+
+    // Evaluate the Green's function difference
+    const amrex::Real eps = 1e-12; // avoid division by zero
+    amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z) + eps);
+    amrex::Real dist2 = std::sqrt((x - r2_x)*(x - r2_x) + (y - r2_y)*(y - r2_y) + (z - r2_z)*(z - r2_z) + eps);
+    amrex::Real p = -1.0/(4.0*M_PI) * (1.0/dist1 - 1.0/dist2);
+    return p;
 }
 
 class PressureBndryFunc
@@ -198,39 +196,33 @@ void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom)
 {
-    // Get domain center
-    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
-    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
-    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
-    
-    // Find the cell indices closest to center
-    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
-    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
-    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
-    
-    // Initialize all velocities to zero
+    // Set all velocities to zero
     for (int d = 0; d < 3; ++d) {
         velocity[d].setVal(0.0);
     }
-    
-    // Set the dipole in the x-direction
+
+    // Set a single nonzero x-face at the center of the domain
+    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
+    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
+    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
+
+    // Find the i, j, k index of the cell-centered grid closest to the domain center
+    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
+    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
+    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
+
+    // The MAC grid's x-face at (center_i+1, center_j, center_k) is between cells (center_i, center_j, center_k) and (center_i+1, center_j, center_k)
     for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
     {
         const amrex::Box& box = mfi.validbox();
         const auto& u_arr = velocity[U].array(mfi);
-        
-        // Only set velocities if the center cells are in this box
-        if (box.contains(center_i, center_j, center_k)) { 
-            u_arr(center_i, center_j, center_k) = -1.0;
-        }
         if (box.contains(center_i+1, center_j, center_k)) {
             u_arr(center_i+1, center_j, center_k) = 1.0;
         }
     }
-    
+
     // Fill ghost cells
-    for (int d = 0; d < 3; ++d)
-    {
+    for (int d = 0; d < 3; ++d) {
         velocity[d].FillBoundary(geom.periodicity());
     }
 }
