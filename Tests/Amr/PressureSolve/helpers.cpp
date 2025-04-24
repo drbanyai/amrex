@@ -77,7 +77,7 @@ static amrex::Real ExpectedPressure(
 
     // Use cell-averaged inverse distance for source cells, pointwise otherwise
     const amrex::Real h = geom.CellSize(0); // Assume cubic cells
-    const amrex::Real avg_inv_r = 1.516386 / h; // <1/r> over the cube
+    const amrex::Real avg_inv_r = 2.0 * 1.516386 / h; // <1/r> over the cube
 
     const amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z));
     const amrex::Real dist2 = std::sqrt((x - r2_x)*(x - r2_x) + (y - r2_y)*(y - r2_y) + (z - r2_z)*(z - r2_z));
