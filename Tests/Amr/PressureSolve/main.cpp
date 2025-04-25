@@ -71,7 +71,8 @@ int MyMain()
         CheckResults(pressure[lev], velocity[lev], geom[lev], i_face, j_face, k_face);
     }
 
-    // Optionally: Sample and output results for all levels to a combined file here
+    // Sample and output results for all levels to a combined CSV file
+    SamplePressureAlongLine(pressure, geom, "pressure_profile_levels.csv"); // Use base grid center as reference
     return 0;
 }
 

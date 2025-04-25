@@ -9,6 +9,7 @@
 #include <AMReX_BCUtil.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_PhysBCFunct.H>
+#include <AMReX_FillPatchUtil.H>
 
 /*--------------------------------------------------------------------
   defines and static variables
@@ -193,48 +194,99 @@ void InitializeVelocity(
 }
 
 void SamplePressureAlongLine(
-    const amrex::MultiFab& pressure,
-    const amrex::MultiFab& divergence,
-    const amrex::Geometry& geom,
-    const std::string& filename,
-    int i_face, int j_face, int k_face)
+    const amrex::Vector<amrex::MultiFab>& pressures,
+    const amrex::Vector<amrex::Geometry>& geoms,
+    const std::string& filename)
 {
-    // Get domain center
-    const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
-    const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
-    const amrex::Real dx = geom.CellSize(0);
-    
-    // Find the cell indices closest to center
-    const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
-    const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
-    
-    // Open file for writing
-    std::ofstream outfile(filename);
-    outfile << "# x, p(x), p_expected(x), cell-integrated divergence\n";
-    
-    // Sample along x-axis through center
-    for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
+    const int finest_lev = static_cast<int>(pressures.size()) - 1;
+
+    const amrex::Geometry& fine_geom = geoms[finest_lev];
+
+    // Get centerline indices for y and z at finest level
+    const amrex::Real center_y = 0.5 * (fine_geom.ProbLo(1) + fine_geom.ProbHi(1));
+    const amrex::Real center_z = 0.5 * (fine_geom.ProbLo(2) + fine_geom.ProbHi(2));
+
+    // Prepare: for each level, create a MultiFab on the finest grid
+    amrex::Vector<amrex::MultiFab> fine_level_pressure(pressures.size());
+    // Simple wrapper for AMReX FillPatchTwoLevels for cell-centered, single-component interpolation
+    auto InterpFromCoarseToFineSimple = [](amrex::MultiFab& fine, const amrex::MultiFab& coarse,
+                                           const amrex::Geometry& coarse_geom, const amrex::Geometry& fine_geom)
     {
-        const amrex::Box& box = mfi.validbox();
-        const auto& p_arr = pressure.array(mfi);
-        const auto& div_arr = divergence.array(mfi);
-        
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-        
-        // Only process if this box contains our line
-        if (lo.y <= center_j && hi.y >= center_j &&
-            lo.z <= center_k && hi.z >= center_k)
-        {
-            for (int i = lo.x; i <= hi.x; ++i)
-            {
-                const amrex::Real x = geom.CellCenter(i, U);
-                const amrex::Real p = p_arr(i, center_j, center_k);
-                const amrex::Real p_expected = ExpectedPressure(geom, i, center_j, center_k, i_face, j_face, k_face);
-                const amrex::Real div = div_arr(i, center_j, center_k);
-                outfile << x << ", " << p << ", " << p_expected << ", " << div*dx*dx*dx << "\n";
-            }
+        BL_PROFILE("InterpFromCoarseToFineSimple");
+        AMREX_ALWAYS_ASSERT(fine.nComp() == 1 && coarse.nComp() == 1);
+        amrex::IntVect ratio = fine_geom.Domain().size() / coarse_geom.Domain().size();
+        // Set up BCRec (all interior Dirichlet for simplicity)
+        amrex::Vector<amrex::BCRec> bcs(1, amrex::BCRec());
+        // Set up coarse/fine state vectors
+        amrex::Vector<amrex::MultiFab*> coarse_data{const_cast<amrex::MultiFab*>(&coarse)};
+        amrex::Vector<amrex::MultiFab*> fine_data; // empty
+        amrex::Vector<amrex::Real> time{0.0};
+        amrex::Vector<amrex::Real> fine_time; // empty
+        amrex::CellConservativeLinear interp;
+        amrex::PhysBCFunctNoOp coarse_bc, fine_bc;
+        amrex::FillPatchTwoLevels(
+            fine, amrex::IntVect(0), amrex::Real(0.0),
+            coarse_data, time,
+            {&fine}, time,
+            0, 0, 1,
+            coarse_geom, fine_geom,
+            coarse_bc, 0,
+            fine_bc, 0,
+            ratio, &interp, bcs, 0);
+    };
+
+    for (int lev = 0; lev <= finest_lev; ++lev) {
+        // Define MultiFab with same structure as pressures[finest_lev]
+        fine_level_pressure[lev].define(
+            pressures[finest_lev].boxArray(),
+            pressures[finest_lev].DistributionMap(),
+            pressures[finest_lev].nComp(),
+            pressures[finest_lev].nGrow());
+        if (lev == finest_lev) {
+            // Copy data from pressures[finest_lev]
+            fine_level_pressure[lev].ParallelCopy(pressures[finest_lev]);
+        } else {
+            fine_level_pressure[lev].setVal(0.0);
+            // Interpolate from coarse level to finest grid using AMReX FillPatchTwoLevels
+            InterpFromCoarseToFineSimple(
+                fine_level_pressure[lev],
+                pressures[lev],
+                geoms[lev],
+                geoms[finest_lev]);
         }
+    }
+
+    // Prepare output
+    std::ofstream outfile(filename);
+    outfile << "x";
+    for (int lev = 0; lev <= finest_lev; ++lev) {
+        outfile << ",pressure_L" << lev;
+    }
+    outfile << ",expected\n";
+
+    const amrex::Box& domain = fine_geom.Domain();
+    for (int i = domain.smallEnd(0); i <= domain.bigEnd(0); ++i) {
+        amrex::Real x = fine_geom.CellCenter(i, 0);
+        outfile << x;
+        // For each level, sample pressure at (i, center_j, center_k) on the finest grid
+        int j = static_cast<int>((center_y - fine_geom.ProbLo(1)) / fine_geom.CellSize(1));
+        int k = static_cast<int>((center_z - fine_geom.ProbLo(2)) / fine_geom.CellSize(2));
+        for (int lev = 0; lev <= finest_lev; ++lev) {
+            amrex::Real val = 0.0;
+            for (amrex::MFIter mfi(fine_level_pressure[lev]); mfi.isValid(); ++mfi) {
+                const amrex::Box& box = mfi.validbox();
+                if (box.contains(amrex::IntVect(i, j, k))) {
+                    const auto& parr = fine_level_pressure[lev].array(mfi);
+                    val = parr(i, j, k);
+                    break;
+                }
+            }
+            outfile << "," << val;
+        }
+        // Add analytic solution as last column
+        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, /*i_face=*/fine_geom.Domain().length(0)/2, /*j_face=*/fine_geom.Domain().length(1)/2, /*k_face=*/fine_geom.Domain().length(2)/2);
+        outfile << "," << expected;
+        outfile << "\n";
     }
     outfile.close();
     
@@ -243,21 +295,23 @@ void SamplePressureAlongLine(
     script << "set terminal png size 800,600\n";
     script << "set output 'pressure_profile.png'\n";
     script << "set xlabel 'x (m)'\n";
-    script << "set ylabel 'Pressure (Pa?)'\n";
-    script << "set y2label 'Cell-Integrated Divergence'\n";
-    // script << "set logscale y\n";
-    script << "set ytics nomirror\n";
-    script << "set y2tics\n";
+    script << "set ylabel 'Pressure (Pa)'\n";
     script << "set xzeroaxis\n";
-    script << "plot '" << filename << "' using 1:2 title 'Computed' with linespoints,\\\n";
-    script << "     '" << filename << "' using 1:3 title 'Expected' with linespoints,\\\n";
-    script << "     '" << filename << "' using 1:4 title 'Divergence' with linespoints axis x1y2\n";
+    script << "set datafile separator ','\n";
+    script << "plot ";
+    for (int lev = 0; lev <= finest_lev; ++lev) {
+        if (lev > 0) script << ", ";
+        script << "'" << filename << "' using 1:" << (lev+2) << " title 'Level " << lev << "' with linespoints";
+    }
+    script << ", '" << filename << "' using 1:" << (finest_lev+3) << " title 'Analytic' with linespoints\n";
     script << "\n";
     script << "set output 'pressure_error.png'\n";
     script << "set xlabel 'x (m)'\n";
-    script << "set ylabel 'Pressure Error (Pa?)'\n";
+    script << "set ylabel 'Pressure Error (Pa)'\n";
     script << "set xzeroaxis\n";
-    script << "plot '" << filename << "' using 1:($2-$3) title 'Computed - Expected' with linespoints\n";
+    script << "set datafile separator ','\n";
+    // Error: finest level minus analytic
+    script << "plot '" << filename << "' using 1:($" << (finest_lev+2) << "-$" << (finest_lev+3) << ") title 'Finest - Analytic' with linespoints\n";
     script.close();
 
     // Run gnuplot
@@ -297,9 +351,6 @@ void SolvePressure(
     }
 
     amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
-    
-    // Sample pressure along center line and create plot
-    SamplePressureAlongLine(pressure, divergence, geom, "pressure_profile.dat", i_face, j_face, k_face);
 }
 
 void CheckResults(

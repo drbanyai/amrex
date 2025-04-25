@@ -44,6 +44,18 @@ void SolvePressure(
     int i_face, int j_face, int k_face);
 
 // Verification
+// Multi-level sampling and CSV output
+/**
+ * @brief Sample pressure along the center line at the finest resolution, interpolating all levels to the fine grid, and write a CSV with columns for each level.
+ * @param pressures Vector of pressure MultiFabs (coarse to fine)
+ * @param geoms Vector of Geometries (coarse to fine)
+ * @param filename Output CSV filename
+ */
+void SamplePressureAlongLine(
+    const amrex::Vector<amrex::MultiFab>& pressures,
+    const amrex::Vector<amrex::Geometry>& geoms,
+    const std::string& filename);
+
 void CheckResults(
     const amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
