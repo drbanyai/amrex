@@ -30,50 +30,48 @@ int main(int argc, char** argv)
 
 int MyMain()
 {
-    // Domain setup
-    constexpr int multiplier = 16;
-    constexpr int nx = multiplier ;
-    constexpr int ny = multiplier;
-    constexpr int nz = multiplier;
-    constexpr double dx = 1.0/multiplier;  // meters
+    constexpr int nlevels = 3;
+    amrex::Vector<amrex::Geometry> geom(nlevels);
+    amrex::Vector<amrex::BoxArray> ba(nlevels);
+    amrex::Vector<amrex::DistributionMapping> dm(nlevels);
+    amrex::Vector<amrex::MultiFab> pressure(nlevels);
+    amrex::Vector<std::array<amrex::MultiFab, 3>> velocity(nlevels);
 
-    // Solver parameters
+    amrex::Vector<int> nx(nlevels), ny(nlevels), nz(nlevels);
+    amrex::Vector<double> dx(nlevels);
+
+    // Set up each level: base grid 4x4x4, 2x refinement per level
+    for (int lev = 0; lev < nlevels; ++lev) {
+        nx[lev] = ny[lev] = nz[lev] = 4 * (1 << lev); // 4, 8, 16
+        dx[lev] = 1.0 / nx[lev];
+        geom[lev] = DefineGeometry(nx[lev], ny[lev], nz[lev], dx[lev]);
+        ba[lev] = DefineBoxArray(nx[lev], ny[lev], nz[lev]);
+        dm[lev] = DefineDM(ba[lev]);
+        DefineFABs(pressure[lev], velocity[lev], ba[lev], dm[lev]);
+    }
+
     constexpr amrex::Real tolerance = 1.0e-6;
-    constexpr int max_iterations = 10*multiplier;
-    constexpr amrex::Real omega = 1.0;  // Under-relaxation parameter
+    constexpr amrex::Real omega = 1.0;
+    const int max_iterations = 500;
 
-    amrex::Print() << "Running test with domain size: " << nx << "x" << ny << "x" << nz << "\n";
-    amrex::Print() << "Solver parameters:\n";
-    amrex::Print() << "  Tolerance: " << tolerance << "\n";
-    amrex::Print() << "  Max iterations: " << max_iterations << "\n";
-    amrex::Print() << "  Relaxation parameter: " << omega << "\n";
+    for (int lev = 0; lev < nlevels; ++lev) {
+        amrex::Print() << "\nLevel " << lev << ": domain size " << nx[lev] << "x" << ny[lev] << "x" << nz[lev] << ", dx = " << dx[lev] << "\n";
+        amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
 
-    // Create geometry and mesh
-    const amrex::Geometry geom = DefineGeometry(nx, ny, nz, dx);
-    const amrex::BoxArray ba = DefineBoxArray(nx, ny, nz);
-    const amrex::DistributionMapping dm = DefineDM(ba);
+        // Nonzero face indices (centered)
+        int i_face = nx[lev]/2;
+        int j_face = ny[lev]/2;
+        int k_face = nz[lev]/2;
 
-    // Allocate data structures
-    amrex::MultiFab pressure;
-    std::array<amrex::MultiFab, 3> velocity;
-    DefineFABs(pressure, velocity, ba, dm);
+        InitializeVelocity(velocity[lev], geom[lev], i_face, j_face, k_face);
+        SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega, i_face, j_face, k_face);
+        CheckResults(pressure[lev], velocity[lev], geom[lev], i_face, j_face, k_face);
+    }
 
-    // Define the nonzero face indices (hardcoded for this test)
-    const int i_face = nx/2;
-    const int j_face = ny/2;
-    const int k_face = nz/2;
-
-    // Initialize velocity field
-    InitializeVelocity(velocity, geom, i_face, j_face, k_face);
-
-    // Solve for pressure
-    SolvePressure(pressure, velocity, geom, tolerance, max_iterations, omega, i_face, j_face, k_face);
-
-    // Verify results
-    CheckResults(pressure, velocity, geom, i_face, j_face, k_face);
-
+    // Optionally: Sample and output results for all levels to a combined file here
     return 0;
 }
+
 
 /*--------------------------------------------------------------------
   End of file
