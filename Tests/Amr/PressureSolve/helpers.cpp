@@ -17,43 +17,10 @@
 static constexpr int U = 0;
 static constexpr int V = 1;
 static constexpr int W = 2;
+
 /*--------------------------------------------------------------------
   private free function declarations
   --------------------------------------------------------------------*/
-static amrex::Real CalculateDipolePressure(
-    const amrex::Real x,
-    const amrex::Real y,
-    const amrex::Real z,
-    const amrex::Real dipole_x,
-    const amrex::Real dipole_y,
-    const amrex::Real dipole_z,
-    const amrex::Real dipole_strength,
-    const int direction)
-{
-    const amrex::Real dx = x - dipole_x;
-    const amrex::Real dy = y - dipole_y;
-    const amrex::Real dz = z - dipole_z;
-    const amrex::Real r2 = dx*dx + dy*dy + dz*dz;
-    const amrex::Real r = std::sqrt(r2);
-    
-    amrex::Real p_x = 0.0;
-    amrex::Real p_y = 0.0;
-    amrex::Real p_z = 0.0;
-    
-    // Set dipole moment based on direction
-    switch (direction) {
-        case 0: p_x = dipole_strength; break;  // +x
-        case 1: p_x = -dipole_strength; break; // -x
-        case 2: p_y = dipole_strength; break;  // +y
-        case 3: p_y = -dipole_strength; break; // -y
-        case 4: p_z = dipole_strength; break;  // +z
-        case 5: p_z = -dipole_strength; break; // -z
-    }
-    
-    const amrex::Real r_dot_p = dx*p_x + dy*p_y + dz*p_z;
-    return (1.0/(4.0*M_PI)) * r_dot_p / (r*r*r + 1e-6);
-}
-
 static amrex::Real ExpectedPressure(
     const amrex::Geometry& geom,
     const int i,
@@ -233,13 +200,11 @@ void SamplePressureAlongLine(
     int i_face, int j_face, int k_face)
 {
     // Get domain center
-    const amrex::Real center_x = 0.5 * (geom.ProbLo(U) + geom.ProbHi(U));
     const amrex::Real center_y = 0.5 * (geom.ProbLo(V) + geom.ProbHi(V));
     const amrex::Real center_z = 0.5 * (geom.ProbLo(W) + geom.ProbHi(W));
     const amrex::Real dx = geom.CellSize(0);
     
     // Find the cell indices closest to center
-    const int center_i = static_cast<int>((center_x - geom.ProbLo(U)) / geom.CellSize(U));
     const int center_j = static_cast<int>((center_y - geom.ProbLo(V)) / geom.CellSize(V));
     const int center_k = static_cast<int>((center_z - geom.ProbLo(W)) / geom.CellSize(W));
     
