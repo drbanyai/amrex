@@ -10,6 +10,7 @@
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_PhysBCFunct.H>
 #include <AMReX_FillPatchUtil.H>
+#include <AMReX_Interpolater.H>
 
 /*--------------------------------------------------------------------
   defines and static variables
@@ -199,7 +200,6 @@ void SamplePressureAlongLine(
     const std::string& filename)
 {
     const int finest_lev = static_cast<int>(pressures.size()) - 1;
-
     const amrex::Geometry& fine_geom = geoms[finest_lev];
 
     // Get centerline indices for y and z at finest level
@@ -208,31 +208,37 @@ void SamplePressureAlongLine(
 
     // Prepare: for each level, create a MultiFab on the finest grid
     amrex::Vector<amrex::MultiFab> fine_level_pressure(pressures.size());
-    // Simple wrapper for AMReX FillPatchTwoLevels for cell-centered, single-component interpolation
+
+    // Simple wrapper for AMReX InterpFromCoarseLevel for cell-centered, single-component interpolation
     auto InterpFromCoarseToFineSimple = [](amrex::MultiFab& fine, const amrex::MultiFab& coarse,
                                            const amrex::Geometry& coarse_geom, const amrex::Geometry& fine_geom)
     {
         BL_PROFILE("InterpFromCoarseToFineSimple");
         AMREX_ALWAYS_ASSERT(fine.nComp() == 1 && coarse.nComp() == 1);
+        
+        // Calculate refinement ratio
         amrex::IntVect ratio = fine_geom.Domain().size() / coarse_geom.Domain().size();
-        // Set up BCRec (all interior Dirichlet for simplicity)
-        amrex::Vector<amrex::BCRec> bcs(1, amrex::BCRec());
-        // Set up coarse/fine state vectors
-        amrex::Vector<amrex::MultiFab*> coarse_data{const_cast<amrex::MultiFab*>(&coarse)};
-        amrex::Vector<amrex::MultiFab*> fine_data; // empty
-        amrex::Vector<amrex::Real> time{0.0};
-        amrex::Vector<amrex::Real> fine_time; // empty
+        AMREX_ALWAYS_ASSERT(ratio[0] == ratio[1] && ratio[1] == ratio[2]); // Ensure uniform refinement
+        
+        // Use cell-centered conservative interpolation
         amrex::CellConservativeLinear interp;
-        amrex::PhysBCFunctNoOp coarse_bc, fine_bc;
-        amrex::FillPatchTwoLevels(
-            fine, amrex::IntVect(0), amrex::Real(0.0),
-            coarse_data, time,
-            {&fine}, time,
-            0, 0, 1,
-            coarse_geom, fine_geom,
-            coarse_bc, 0,
-            fine_bc, 0,
-            ratio, &interp, bcs, 0);
+        
+        // Set up boundary conditions (one component)
+        amrex::Vector<amrex::BCRec> bcr(1);
+        
+        // Interpolate from coarse to fine level
+        amrex::InterpFromCoarseLevel(fine,      // destination MultiFab
+                                    amrex::IntVect{}, amrex::IntVect{},
+                                    coarse,    // source MultiFab
+                                    0,         // source component
+                                    0,         // destination component
+                                    1,         // number of components
+                                    coarse_geom,  // coarse geometry
+                                    fine_geom,    // fine geometry
+                                    // bcr,          // boundary conditions
+                                    ratio,        // refinement ratio
+                                    &interp,
+                                    bcr, 0);     // interpolation operator
     };
 
     for (int lev = 0; lev <= finest_lev; ++lev) {
@@ -242,12 +248,12 @@ void SamplePressureAlongLine(
             pressures[finest_lev].DistributionMap(),
             pressures[finest_lev].nComp(),
             pressures[finest_lev].nGrow());
+            
         if (lev == finest_lev) {
             // Copy data from pressures[finest_lev]
             fine_level_pressure[lev].ParallelCopy(pressures[finest_lev]);
         } else {
-            fine_level_pressure[lev].setVal(0.0);
-            // Interpolate from coarse level to finest grid using AMReX FillPatchTwoLevels
+            // Interpolate from coarse level to finest grid
             InterpFromCoarseToFineSimple(
                 fine_level_pressure[lev],
                 pressures[lev],
@@ -264,10 +270,12 @@ void SamplePressureAlongLine(
     }
     outfile << ",expected\n";
 
+    // Sample along x-axis at center_y, center_z
     const amrex::Box& domain = fine_geom.Domain();
     for (int i = domain.smallEnd(0); i <= domain.bigEnd(0); ++i) {
         amrex::Real x = fine_geom.CellCenter(i, 0);
         outfile << x;
+        
         // For each level, sample pressure at (i, center_j, center_k) on the finest grid
         int j = static_cast<int>((center_y - fine_geom.ProbLo(1)) / fine_geom.CellSize(1));
         int k = static_cast<int>((center_z - fine_geom.ProbLo(2)) / fine_geom.CellSize(2));
@@ -283,8 +291,12 @@ void SamplePressureAlongLine(
             }
             outfile << "," << val;
         }
+        
         // Add analytic solution as last column
-        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, /*i_face=*/fine_geom.Domain().length(0)/2, /*j_face=*/fine_geom.Domain().length(1)/2, /*k_face=*/fine_geom.Domain().length(2)/2);
+        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, 
+            /*i_face=*/fine_geom.Domain().length(0)/2, 
+            /*j_face=*/fine_geom.Domain().length(1)/2, 
+            /*k_face=*/fine_geom.Domain().length(2)/2);
         outfile << "," << expected;
         outfile << "\n";
     }
