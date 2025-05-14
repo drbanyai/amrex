@@ -28,7 +28,8 @@ static amrex::Real ExpectedPressure(
     const int i,
     const int j,
     const int k,
-    int i_face, int j_face, int k_face)
+    int i_face, int j_face, int k_face,
+    const amrex::Geometry& reference_geom)
 {
     // Analytic solution for a dipole in infinite domain:
     // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
@@ -36,16 +37,21 @@ static amrex::Real ExpectedPressure(
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
 
-    // The nonzero x-face is at (i_face, j_face, k_face), between cells (i_face-1, j_face, k_face) and (i_face, j_face, k_face)
-    const amrex::Real r1_x = geom.CellCenter(i_face-1, U); // cell to the left
-    const amrex::Real r2_x = geom.CellCenter(i_face, U);   // cell to the right
-    const amrex::Real r1_y = geom.CellCenter(j_face, V);
-    const amrex::Real r2_y = geom.CellCenter(j_face, V);
-    const amrex::Real r1_z = geom.CellCenter(k_face, W);
-    const amrex::Real r2_z = geom.CellCenter(k_face, W);
+    // Convert fine grid face indices to coarse grid indices
+    amrex::IntVect ratio = geom.Domain().size() / reference_geom.Domain().size();
+    amrex::IntVect fine_face(i_face, j_face, k_face);
+    amrex::IntVect coarse_face = amrex::coarsen(fine_face, ratio);
+
+    // The nonzero x-face is at (coarse_face[0], coarse_face[1], coarse_face[2]), between cells (coarse_face[0]-1, coarse_face[1], coarse_face[2]) and (coarse_face[0], coarse_face[1], coarse_face[2])
+    const amrex::Real r1_x = reference_geom.CellCenter(coarse_face[0]-1, U); // cell to the left
+    const amrex::Real r2_x = reference_geom.CellCenter(coarse_face[0], U);   // cell to the right
+    const amrex::Real r1_y = reference_geom.CellCenter(coarse_face[1], V);
+    const amrex::Real r2_y = reference_geom.CellCenter(coarse_face[1], V);
+    const amrex::Real r1_z = reference_geom.CellCenter(coarse_face[2], W);
+    const amrex::Real r2_z = reference_geom.CellCenter(coarse_face[2], W);
 
     // Use cell-averaged inverse distance for source cells, pointwise otherwise
-    const amrex::Real h = geom.CellSize(0); // Assume cubic cells
+    const amrex::Real h = reference_geom.CellSize(0); // Assume cubic cells
     const amrex::Real avg_inv_r = 2.0 * 1.516386 / h; // <1/r> over the cube
 
     const amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z));
@@ -85,7 +91,7 @@ public:
             {
                 // Only operate on external ghost cells
                 if (!valid_box.contains(i,j,k)) {
-                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face);
+                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face, geom);
                 }
             });
     }
@@ -296,7 +302,8 @@ void SamplePressureAlongLine(
         amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, 
             /*i_face=*/fine_geom.Domain().length(0)/2, 
             /*j_face=*/fine_geom.Domain().length(1)/2, 
-            /*k_face=*/fine_geom.Domain().length(2)/2);
+            /*k_face=*/fine_geom.Domain().length(2)/2,
+            fine_geom);
         outfile << "," << expected;
         outfile << "\n";
     }
@@ -389,7 +396,7 @@ void CheckResults(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face);
+                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face, geom);
                     const amrex::Real error = std::abs(p_arr(i, j, k) - expected);
 
                     max_error = std::max(max_error, error);
