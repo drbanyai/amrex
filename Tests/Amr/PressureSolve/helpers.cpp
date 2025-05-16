@@ -76,12 +76,6 @@ static amrex::Real ExpectedPressure(
 class PressureBndryFunc
 {
 public:
-    PressureBndryFunc(const amrex::Geometry& geom) {
-        const auto [i, j, k] = GetCenterCoordinates(geom);
-        i_face = i;
-        j_face = j;
-        k_face = k;
-    }
     void operator()(
         amrex::Box const& bx,
         amrex::FArrayBox& data,
@@ -107,8 +101,6 @@ public:
                 }
             });
     }
-private:
-    int i_face, j_face, k_face;
 };
 
 static void GaussSeidelIteration(
@@ -387,7 +379,6 @@ void CheckResults(
     amrex::Real max_error = 0.0;
     amrex::Real avg_error = 0.0;
     amrex::Real volume = 0.0;
-    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
 
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
     {
@@ -501,7 +492,7 @@ static void GaussSeidelIteration(
     }
 
     // Create boundary condition functor
-    PressureBndryFunc pbf(geom);
+    PressureBndryFunc pbf{};
     amrex::PhysBCFunct<PressureBndryFunc> physbc(geom, bc, pbf);
 
     // Fill ghost cells with boundary conditions
