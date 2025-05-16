@@ -23,12 +23,17 @@ static constexpr int W = 2;
 /*--------------------------------------------------------------------
   private free function declarations
   --------------------------------------------------------------------*/
+// Helper function to get center coordinates
+static std::array<int,3> GetCenterCoordinates(const amrex::Geometry& geom) {
+    const auto len = geom.Domain().bigEnd() - geom.Domain().smallEnd();
+    return {(len[0] + 1) / 2, (len[1] + 1) / 2, (len[2] + 1) / 2 };
+}
+
 static amrex::Real ExpectedPressure(
     const amrex::Geometry& geom,
-    const int i,
-    const int j,
-    const int k,
-    int i_face, int j_face, int k_face,
+    int i,
+    int j,
+    int k,
     const amrex::Geometry& reference_geom)
 {
     // Analytic solution for a dipole in infinite domain:
@@ -36,6 +41,9 @@ static amrex::Real ExpectedPressure(
     const amrex::Real x = geom.CellCenter(i, U);
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
+
+    // Get face indices from geometry
+    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
 
     // Convert fine grid face indices to coarse grid indices
     amrex::IntVect ratio = geom.Domain().size() / reference_geom.Domain().size();
@@ -68,8 +76,12 @@ static amrex::Real ExpectedPressure(
 class PressureBndryFunc
 {
 public:
-    PressureBndryFunc(int i_face_, int j_face_, int k_face_)
-        : i_face(i_face_), j_face(j_face_), k_face(k_face_) {}
+    PressureBndryFunc(const amrex::Geometry& geom) {
+        const auto [i, j, k] = GetCenterCoordinates(geom);
+        i_face = i;
+        j_face = j;
+        k_face = k;
+    }
     void operator()(
         amrex::Box const& bx,
         amrex::FArrayBox& data,
@@ -91,7 +103,7 @@ public:
             {
                 // Only operate on external ghost cells
                 if (!valid_box.contains(i,j,k)) {
-                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face, geom);
+                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, geom);
                 }
             });
     }
@@ -104,8 +116,7 @@ static void GaussSeidelIteration(
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
     amrex::Real omega,
-    int iteration,
-    int i_face, int j_face, int k_face);
+    int iteration);
 
 static amrex::Real ComputeResidual(
     const amrex::MultiFab& pressure,
@@ -175,13 +186,14 @@ void DefineFABs(
 
 void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom,
-    int i_face, int j_face, int k_face)
+    const amrex::Geometry& geom)
 {
     // Set all velocities to zero
     for (int d = 0; d < 3; ++d) {
         velocity[d].setVal(0.0);
     }
+
+    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
 
     // Set a single nonzero x-face at the specified face indices
     for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
@@ -299,11 +311,7 @@ void SamplePressureAlongLine(
         }
         
         // Add analytic solution as last column
-        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, 
-            /*i_face=*/fine_geom.Domain().length(0)/2, 
-            /*j_face=*/fine_geom.Domain().length(1)/2, 
-            /*k_face=*/fine_geom.Domain().length(2)/2,
-            fine_geom);
+        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, fine_geom);
         outfile << "," << expected;
         outfile << "\n";
     }
@@ -343,8 +351,7 @@ void SolvePressure(
     const amrex::Geometry& geom,
     amrex::Real tolerance,
     int max_iterations,
-    amrex::Real omega,
-    int i_face, int j_face, int k_face)
+    amrex::Real omega)
 {
     // Allocate and compute divergence
     amrex::MultiFab divergence(pressure.boxArray(), pressure.DistributionMap(), 1, 0);
@@ -359,7 +366,7 @@ void SolvePressure(
 
     while (residual > tolerance && iteration < max_iterations)
     {
-        GaussSeidelIteration(pressure, divergence, geom, omega, iteration, i_face, j_face, k_face);
+        GaussSeidelIteration(pressure, divergence, geom, omega, iteration);
         residual = ComputeResidual(pressure, divergence, geom);
         iteration++;
 
@@ -375,12 +382,12 @@ void SolvePressure(
 void CheckResults(
     const amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom,
-    int i_face, int j_face, int k_face)
+    const amrex::Geometry& geom)
 {
     amrex::Real max_error = 0.0;
     amrex::Real avg_error = 0.0;
     amrex::Real volume = 0.0;
+    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
 
     for (amrex::MFIter mfi(pressure); mfi.isValid(); ++mfi)
     {
@@ -396,7 +403,7 @@ void CheckResults(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, i_face, j_face, k_face, geom);
+                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, geom);
                     const amrex::Real error = std::abs(p_arr(i, j, k) - expected);
 
                     max_error = std::max(max_error, error);
@@ -477,8 +484,7 @@ static void GaussSeidelIteration(
     const amrex::MultiFab& divergence,
     const amrex::Geometry& geom,
     amrex::Real omega,
-    int iteration,
-    int i_face, int j_face, int k_face)
+    int iteration)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dx2 = dx * dx;
@@ -495,7 +501,7 @@ static void GaussSeidelIteration(
     }
 
     // Create boundary condition functor
-    PressureBndryFunc pbf(i_face, j_face, k_face);
+    PressureBndryFunc pbf(geom);
     amrex::PhysBCFunct<PressureBndryFunc> physbc(geom, bc, pbf);
 
     // Fill ghost cells with boundary conditions

@@ -30,8 +30,7 @@ void DefineFABs(
 // Initialization
 void InitializeVelocity(
     std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom,
-    int i_face, int j_face, int k_face);
+    const amrex::Geometry& geom);
 
 // Main pressure solver function
 void SolvePressure(
@@ -40,8 +39,7 @@ void SolvePressure(
     const amrex::Geometry& geom,
     amrex::Real tolerance,
     int max_iterations,
-    amrex::Real omega,
-    int i_face, int j_face, int k_face);
+    amrex::Real omega);
 
 // Verification
 // Multi-level sampling and CSV output
@@ -59,8 +57,7 @@ void SamplePressureAlongLine(
 void CheckResults(
     const amrex::MultiFab& pressure,
     const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom,
-    int i_face, int j_face, int k_face);
+    const amrex::Geometry& geom);
 
 /*--------------------------------------------------------------------
   End of file

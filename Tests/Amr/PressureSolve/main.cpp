@@ -57,22 +57,18 @@ int MyMain()
         dm[lev] = DefineDM(ba[lev]);
         DefineFABs(pressure[lev], velocity[lev], ba[lev], dm[lev]);
 
-        // Centered face indices
-        const int i_face = n/2;
-        const int j_face = n/2;
-        const int k_face = n/2;
-
         amrex::Print() << "\nLevel " << lev << ": domain size " << n << "x" << n << "x" << n << ", dx = " << dx << "\n";
         amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
 
         // Velocity initialization, pressure solve, diagnostics
-        InitializeVelocity(velocity[lev], geom[lev], i_face, j_face, k_face);
-        SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega, i_face, j_face, k_face);
-        CheckResults(pressure[lev], velocity[lev], geom[lev], i_face, j_face, k_face);
+        InitializeVelocity(velocity[lev], geom[lev]);
+        SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega);
+        CheckResults(pressure[lev], velocity[lev], geom[lev]);
     }
 
     // Sample and output results for all levels to a combined CSV file
-    SamplePressureAlongLine(pressure, geom, "pressure_profile_levels.csv"); // Use base grid center as reference
+    SamplePressureAlongLine(pressure, geom, "pressure.csv");
+
     return 0;
 }
 
