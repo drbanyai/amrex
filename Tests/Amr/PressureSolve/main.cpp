@@ -38,6 +38,23 @@ int MyMain()
     constexpr amrex::Real omega = 1.0;
     constexpr int max_iterations = 500;
 
+    // First create and work with fine-level data
+    const int fine_n = 8;
+    const amrex::Real fine_dx = domain_length / fine_n;
+
+    // Create fine-level data structures
+    amrex::Geometry fine_geom = DefineGeometry(fine_n, fine_n, fine_n, fine_dx);
+    amrex::BoxArray fine_ba = DefineBoxArray(fine_n, fine_n, fine_n);
+    amrex::DistributionMapping fine_dm = DefineDM(fine_ba);
+    amrex::MultiFab fine_pressure;
+    std::array<amrex::MultiFab, 3> fine_velocity;
+    DefineFABs(fine_pressure, fine_velocity, fine_ba, fine_dm);
+
+    // Work with fine-level data
+    InitializeVelocity(fine_velocity, fine_geom);
+    SolvePressure(fine_pressure, fine_velocity, fine_geom, tolerance, max_iterations, omega);
+    CheckResults(fine_pressure, fine_velocity, fine_geom);
+
     // AMReX containers for mesh and field data
     amrex::Vector<amrex::Geometry> geom(nlevels);
     amrex::Vector<amrex::BoxArray> ba(nlevels);
