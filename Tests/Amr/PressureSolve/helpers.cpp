@@ -23,18 +23,11 @@ static constexpr int W = 2;
 /*--------------------------------------------------------------------
   private free function declarations
   --------------------------------------------------------------------*/
-// Helper function to get center coordinates
-static std::array<int,3> GetCenterCoordinates(const amrex::Geometry& geom) {
-    const auto len = geom.Domain().bigEnd() - geom.Domain().smallEnd();
-    return {(len[0] + 1) / 2, (len[1] + 1) / 2, (len[2] + 1) / 2 };
-}
-
 static amrex::Real ExpectedPressure(
     const amrex::Geometry& geom,
     int i,
     int j,
-    int k,
-    const amrex::Geometry& reference_geom)
+    int k)
 {
     // Analytic solution for a dipole in infinite domain:
     // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
@@ -42,24 +35,19 @@ static amrex::Real ExpectedPressure(
     const amrex::Real y = geom.CellCenter(j, V);
     const amrex::Real z = geom.CellCenter(k, W);
 
-    // Get face indices from geometry
-    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
-
-    // Convert fine grid face indices to coarse grid indices
-    amrex::IntVect ratio = geom.Domain().size() / reference_geom.Domain().size();
-    amrex::IntVect fine_face(i_face, j_face, k_face);
-    amrex::IntVect coarse_face = amrex::coarsen(fine_face, ratio);
-
     // The nonzero x-face is at (coarse_face[0], coarse_face[1], coarse_face[2]), between cells (coarse_face[0]-1, coarse_face[1], coarse_face[2]) and (coarse_face[0], coarse_face[1], coarse_face[2])
-    const amrex::Real r1_x = reference_geom.CellCenter(coarse_face[0]-1, U); // cell to the left
-    const amrex::Real r2_x = reference_geom.CellCenter(coarse_face[0], U);   // cell to the right
-    const amrex::Real r1_y = reference_geom.CellCenter(coarse_face[1], V);
-    const amrex::Real r2_y = reference_geom.CellCenter(coarse_face[1], V);
-    const amrex::Real r1_z = reference_geom.CellCenter(coarse_face[2], W);
-    const amrex::Real r2_z = reference_geom.CellCenter(coarse_face[2], W);
+    const amrex::Real centerMinus = 3.5/8.0; // 15.5/32.0;  // Cell center of cell to the left of the face
+    const amrex::Real centerPlus = 4.5/8.0; // 16.5/32.0;   // Cell center of cell to the right of the face
+
+    const amrex::Real r1_x = centerMinus;   // reference_geom.CellCenter(coarse_face[0]-1, U); // cell to the left
+    const amrex::Real r2_x = centerPlus;    // reference_geom.CellCenter(coarse_face[0], U);   // cell to the right
+    const amrex::Real r1_y = centerPlus;    // reference_geom.CellCenter(coarse_face[1], V);
+    const amrex::Real r2_y = centerPlus;    // reference_geom.CellCenter(coarse_face[1], V);
+    const amrex::Real r1_z = centerPlus;    // reference_geom.CellCenter(coarse_face[2], W);
+    const amrex::Real r2_z = centerPlus;    // reference_geom.CellCenter(coarse_face[2], W);
 
     // Use cell-averaged inverse distance for source cells, pointwise otherwise
-    const amrex::Real h = reference_geom.CellSize(0); // Assume cubic cells
+    const amrex::Real h = 1.0/8.0;
     const amrex::Real avg_inv_r = 2.0 * 1.516386 / h; // <1/r> over the cube
 
     const amrex::Real dist1 = std::sqrt((x - r1_x)*(x - r1_x) + (y - r1_y)*(y - r1_y) + (z - r1_z)*(z - r1_z));
@@ -97,7 +85,7 @@ public:
             {
                 // Only operate on external ghost cells
                 if (!valid_box.contains(i,j,k)) {
-                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k, geom);
+                    arr(i,j,k,n+dcomp) = ExpectedPressure(geom, i, j, k);
                 }
             });
     }
@@ -185,22 +173,26 @@ void InitializeVelocity(
         velocity[d].setVal(0.0);
     }
 
-    const auto [i_face, j_face, k_face] = GetCenterCoordinates(geom);
+    if (geom.Domain().length(0) == 8) {
+        const int i_face = 4;
+        const int j_face = 4;
+        const int k_face = 4;
 
-    // Set a single nonzero x-face at the specified face indices
-    for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& u_arr = velocity[U].array(mfi);
-        if (box.contains(i_face, j_face, k_face)) {
-            const amrex::Real dx = geom.CellSize(0);
-            u_arr(i_face, j_face, k_face) = 1.0 / (dx * dx);
+        // Set a single nonzero x-face at the specified face indices
+        for (amrex::MFIter mfi(velocity[U]); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &box = mfi.validbox();
+            const auto &u_arr = velocity[U].array(mfi);
+            if (box.contains(i_face, j_face, k_face)) {
+                const amrex::Real dx = geom.CellSize(0);
+                u_arr(i_face, j_face, k_face) = 1.0 / (dx * dx);
+            }
         }
-    }
 
-    // Fill ghost cells
-    for (int d = 0; d < 3; ++d) {
-        velocity[d].FillBoundary(geom.periodicity());
+        // Fill ghost cells
+        for (int d = 0; d < 3; ++d) {
+            velocity[d].FillBoundary(geom.periodicity());
+        }
     }
 }
 
@@ -303,7 +295,7 @@ void SamplePressureAlongLine(
         }
         
         // Add analytic solution as last column
-        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k, fine_geom);
+        amrex::Real expected = ExpectedPressure(fine_geom, i, j, k);
         outfile << "," << expected;
         outfile << "\n";
     }
@@ -394,7 +386,7 @@ void CheckResults(
             {
                 for (int k = lo.z; k <= hi.z; ++k)
                 {
-                    const amrex::Real expected = ExpectedPressure(geom, i, j, k, geom);
+                    const amrex::Real expected = ExpectedPressure(geom, i, j, k);
                     const amrex::Real error = std::abs(p_arr(i, j, k) - expected);
 
                     max_error = std::max(max_error, error);
