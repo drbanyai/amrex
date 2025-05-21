@@ -16,33 +16,32 @@
   forward declarations
   --------------------------------------------------------------------*/
 int MyMain();
-void CompareMultiFabs(const amrex::MultiFab& mf1, const amrex::MultiFab& mf2, const std::string& name);
+void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf, const std::string& name);
 
 /*--------------------------------------------------------------------
   function definitions
   --------------------------------------------------------------------*/
-void CompareMultiFabs(const amrex::MultiFab& mf1, const amrex::MultiFab& mf2, const std::string& name)
+void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf, const std::string& name)
 {
     amrex::Print() << "\nComparing " << name << ":\n";
     
-    // Create a copy of mf1 with the same distribution mapping as mf2
-    amrex::MultiFab mf1_remapped(mf2.boxArray(), mf2.DistributionMap(), 1, 0);
-    mf1_remapped.ParallelCopy(mf1);
+    // Create a copy of expected_mf with the same distribution mapping as actual_mf
+    amrex::MultiFab expected_remapped(actual_mf.boxArray(), actual_mf.DistributionMap(), 1, 0);
+    expected_remapped.ParallelCopy(expected_mf);
     
-    // Compute max absolute difference
-    // Compute L2 norm of difference
+    // Compute max absolute difference and L2 norm of difference
     amrex::Real max_diff = 0.0;
     amrex::Real l2_diff = 0.0;
-    for (amrex::MFIter mfi(mf2); mfi.isValid(); ++mfi) {
+    for (amrex::MFIter mfi(actual_mf); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
-        const auto& fab1 = mf1_remapped[mfi];
-        const auto& fab2 = mf2[mfi];
+        const auto& expected_fab = expected_remapped[mfi];
+        const auto& actual_fab = actual_mf[mfi];
         
         for (int i = bx.loVect()[0]; i <= bx.hiVect()[0]; ++i) {
             for (int j = bx.loVect()[1]; j <= bx.hiVect()[1]; ++j) {
                 for (int k = bx.loVect()[2]; k <= bx.hiVect()[2]; ++k) {
-                    amrex::Real diff = std::abs(fab1(amrex::IntVect(i,j,k)) - 
-                                              fab2(amrex::IntVect(i,j,k)));
+                    amrex::Real diff = std::abs(expected_fab(amrex::IntVect(i,j,k)) - 
+                                              actual_fab(amrex::IntVect(i,j,k)));
                     max_diff = std::max(max_diff, diff);
                     l2_diff += diff * diff;
                 }
