@@ -16,10 +16,50 @@
   forward declarations
   --------------------------------------------------------------------*/
 int MyMain();
+void CompareMultiFabs(const amrex::MultiFab& mf1, const amrex::MultiFab& mf2, const std::string& name);
 
 /*--------------------------------------------------------------------
   function definitions
   --------------------------------------------------------------------*/
+void CompareMultiFabs(const amrex::MultiFab& mf1, const amrex::MultiFab& mf2, const std::string& name)
+{
+    amrex::Print() << "\nComparing " << name << ":\n";
+    
+    // Create a copy of mf1 with the same distribution mapping as mf2
+    amrex::MultiFab mf1_remapped(mf2.boxArray(), mf2.DistributionMap(), 1, 0);
+    mf1_remapped.ParallelCopy(mf1);
+    
+    // Compute max absolute difference
+    // Compute L2 norm of difference
+    amrex::Real max_diff = 0.0;
+    amrex::Real l2_diff = 0.0;
+    for (amrex::MFIter mfi(mf2); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        const auto& fab1 = mf1_remapped[mfi];
+        const auto& fab2 = mf2[mfi];
+        
+        for (int i = bx.loVect()[0]; i <= bx.hiVect()[0]; ++i) {
+            for (int j = bx.loVect()[1]; j <= bx.hiVect()[1]; ++j) {
+                for (int k = bx.loVect()[2]; k <= bx.hiVect()[2]; ++k) {
+                    amrex::Real diff = std::abs(fab1(amrex::IntVect(i,j,k)) - 
+                                              fab2(amrex::IntVect(i,j,k)));
+                    max_diff = std::max(max_diff, diff);
+                    l2_diff += diff * diff;
+                }
+            }
+        }
+    }
+    
+    // Reduce max_diff across all processes
+    amrex::ParallelDescriptor::ReduceRealMax(max_diff);
+    // Reduce l2_diff across all processes
+    amrex::ParallelDescriptor::ReduceRealSum(l2_diff);
+    l2_diff = std::sqrt(l2_diff);
+
+    amrex::Print() << "  Maximum absolute difference: " << max_diff << "\n";
+    amrex::Print() << "  L2 norm of difference: " << l2_diff << "\n";
+}
+
 int main(int argc, char** argv)
 {
     amrex::Initialize(argc, argv);
@@ -81,6 +121,11 @@ int MyMain()
         InitializeVelocity(velocity[lev], geom[lev]);
         SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega);
         CheckResults(pressure[lev], velocity[lev], geom[lev]);
+
+        // Compare fine pressure with array pressure at finest level
+        if (lev == nlevels-1) { // TODO: Compare all
+            CompareMultiFabs(fine_pressure, pressure[lev], "fine pressure with pressure at level " + std::to_string(lev));
+        }
     }
 
     // Sample and output results for all levels to a combined CSV file
