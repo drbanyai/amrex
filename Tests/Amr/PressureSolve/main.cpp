@@ -16,13 +16,21 @@
   forward declarations
   --------------------------------------------------------------------*/
 int MyMain();
-void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf, const std::string& name);
+static void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf, 
+                      const amrex::Geometry& expected_geom, const amrex::Geometry& actual_geom,
+                      const std::string& name);
 
 /*--------------------------------------------------------------------
   function definitions
   --------------------------------------------------------------------*/
-void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf, const std::string& name)
+static void CompareMultiFabs(const amrex::MultiFab& expected_mf, const amrex::MultiFab& actual_mf,
+                      const amrex::Geometry& expected_geom, const amrex::Geometry& actual_geom,
+                      const std::string& name)
 {
+    // Verify domain consistency
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(expected_geom.Domain() == actual_geom.Domain(),
+        "Physical domains must match for comparison");
+
     amrex::Print() << "\nComparing " << name << ":\n";
     
     // Create a copy of expected_mf with the same distribution mapping as actual_mf
@@ -123,7 +131,9 @@ int MyMain()
 
         // Compare fine pressure with array pressure at finest level
         if (lev == nlevels-1) { // TODO: Compare all
-            CompareMultiFabs(fine_pressure, pressure[lev], "fine pressure with pressure at level " + std::to_string(lev));
+            CompareMultiFabs(fine_pressure, pressure[lev], 
+                           fine_geom, geom[lev],
+                           "fine pressure with pressure at level " + std::to_string(lev));
         }
     }
 
