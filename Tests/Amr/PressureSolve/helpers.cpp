@@ -197,19 +197,18 @@ void InitializeVelocity(
 }
 
 void SamplePressureAlongLine(
-    const amrex::Vector<amrex::MultiFab>& pressures,
-    const amrex::Vector<amrex::Geometry>& geoms,
+    const std::vector<LevelData>& level_data,
     const std::string& filename)
 {
-    const int finest_lev = static_cast<int>(pressures.size()) - 1;
-    const amrex::Geometry& fine_geom = geoms[finest_lev];
+    const int finest_lev = static_cast<int>(level_data.size()) - 1;
+    const amrex::Geometry& fine_geom = level_data[finest_lev].geom;
 
     // Get centerline indices for y and z at finest level
     const amrex::Real center_y = 0.5 * (fine_geom.ProbLo(1) + fine_geom.ProbHi(1));
     const amrex::Real center_z = 0.5 * (fine_geom.ProbLo(2) + fine_geom.ProbHi(2));
 
     // Prepare: for each level, create a MultiFab on the finest grid
-    amrex::Vector<amrex::MultiFab> fine_level_pressure(pressures.size());
+    amrex::Vector<amrex::MultiFab> fine_level_pressure(level_data.size());
 
     // Simple wrapper for AMReX InterpFromCoarseLevel for cell-centered, single-component interpolation
     auto InterpFromCoarseToFineSimple = [](amrex::MultiFab& fine, const amrex::MultiFab& coarse,
@@ -237,30 +236,29 @@ void SamplePressureAlongLine(
                                     1,         // number of components
                                     coarse_geom,  // coarse geometry
                                     fine_geom,    // fine geometry
-                                    // bcr,          // boundary conditions
                                     ratio,        // refinement ratio
                                     &interp,
                                     bcr, 0);     // interpolation operator
     };
 
     for (int lev = 0; lev <= finest_lev; ++lev) {
-        // Define MultiFab with same structure as pressures[finest_lev]
+        // Define MultiFab with same structure as level_data[finest_lev].pressure
         fine_level_pressure[lev].define(
-            pressures[finest_lev].boxArray(),
-            pressures[finest_lev].DistributionMap(),
-            pressures[finest_lev].nComp(),
-            pressures[finest_lev].nGrow());
+            level_data[finest_lev].pressure.boxArray(),
+            level_data[finest_lev].pressure.DistributionMap(),
+            level_data[finest_lev].pressure.nComp(),
+            level_data[finest_lev].pressure.nGrow());
             
         if (lev == finest_lev) {
-            // Copy data from pressures[finest_lev]
-            fine_level_pressure[lev].ParallelCopy(pressures[finest_lev]);
+            // Copy data from level_data[finest_lev].pressure
+            fine_level_pressure[lev].ParallelCopy(level_data[finest_lev].pressure);
         } else {
             // Interpolate from coarse level to finest grid
             InterpFromCoarseToFineSimple(
                 fine_level_pressure[lev],
-                pressures[lev],
-                geoms[lev],
-                geoms[finest_lev]);
+                level_data[lev].pressure,
+                level_data[lev].geom,
+                level_data[finest_lev].geom);
         }
     }
 
@@ -412,18 +410,15 @@ void CheckResults(
 }
 
 void CompareMultiFabs(
-    const amrex::MultiFab& expected_mf,
-    const amrex::Vector<amrex::MultiFab>& level_mfs,
-    const amrex::Geometry& expected_geom,
-    const amrex::Vector<amrex::Geometry>& level_geoms,
-    const std::string& name)
+    const LevelData& expected_level,
+    const std::vector<LevelData>& level_data)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(level_mfs.size() == level_geoms.size(),
-        "Number of level MultiFabs must match number of level Geometries");
+    const auto& expected_mf = expected_level.pressure;
+    const auto& expected_geom = expected_level.geom;
 
-    for (int lev = 0; lev < level_mfs.size(); ++lev) {
-        const auto& level_mf = level_mfs[lev];
-        const auto& level_geom = level_geoms[lev];
+    for (int lev = 0; lev < level_data.size(); ++lev) {
+        const auto& level_mf = level_data[lev].pressure;
+        const auto& level_geom = level_data[lev].geom;
 
         // Check real boxes match
         if ( !amrex::AlmostEqual(expected_geom.ProbDomain(), level_geom.ProbDomain()) ) {
@@ -434,7 +429,7 @@ void CompareMultiFabs(
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(amrex::AlmostEqual(expected_geom.ProbDomain(), level_geom.ProbDomain()),
             "Real boxes must match between expected and level geometries");
 
-        amrex::Print() << "\nComparing " << name << " at level " << lev << ":\n";
+        amrex::Print() << "\nComparing pressure at level " << lev << ":\n";
 
         // Create a copy of expected_mf with the same distribution mapping as level_mf
         amrex::MultiFab expected_remapped(level_mf.boxArray(), level_mf.DistributionMap(), 1, 0);
@@ -486,7 +481,7 @@ void CompareMultiFabs(
         amrex::ParallelDescriptor::ReduceRealMax(max_diff);
         amrex::ParallelDescriptor::ReduceRealSum(l2_diff);
         amrex::ParallelDescriptor::ReduceRealSum(volume);
-
+        
         // Compute normalized L2 norm
         l2_diff = std::sqrt(l2_diff / volume);
 
@@ -503,7 +498,6 @@ void CompareMultiFabs(
         if (l2_diff > l2_tolerance) {
             amrex::Print() << "\nWARNING: L2 norm of difference exceeds tolerance (" << l2_tolerance << ")!\n";
         }
-
     }
 }
 
@@ -667,6 +661,31 @@ static amrex::Real ComputeResidual(
     amrex::ParallelDescriptor::ReduceRealSum(volume);
 
     return std::sqrt(residual / volume);
+}
+
+LevelData::LevelData(int n, amrex::Real domain_length)
+    : geom(DefineGeometry(n, n, n, domain_length / n)),
+      ba(DefineBoxArray(n, n, n)),
+      dm(DefineDM(ba))
+{
+}
+
+LevelData MakeDenseLevelData(int n, amrex::Real domain_length)
+{
+    LevelData level_data(n, domain_length);
+    DefineFABs(level_data.pressure, level_data.velocity, level_data.ba, level_data.dm);
+    InitializeVelocity(level_data.velocity, level_data.geom);
+    return level_data;
+}
+
+std::vector<LevelData> MakeDenseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length)
+{
+    std::vector<LevelData> composite_levels;
+    for (int lev = 0; lev < nlevels; ++lev) {
+        int n = base_n * (1 << lev);
+        composite_levels.push_back(MakeDenseLevelData(n, domain_length));
+    }
+    return composite_levels;
 }
 
 /*--------------------------------------------------------------------

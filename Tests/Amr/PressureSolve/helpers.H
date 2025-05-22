@@ -10,6 +10,16 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_Vector.H>
 #include <array>
+#include <vector>
+
+struct LevelData {
+    LevelData(int n, amrex::Real domain_length);
+    const amrex::Geometry geom;
+    const amrex::BoxArray ba;
+    const amrex::DistributionMapping dm;
+    amrex::MultiFab pressure;
+    std::array<amrex::MultiFab, 3> velocity;
+};
 
 /*--------------------------------------------------------------------
   public free function declarations
@@ -45,13 +55,11 @@ void SolvePressure(
 // Multi-level sampling and CSV output
 /**
  * @brief Sample pressure along the center line at the finest resolution, interpolating all levels to the fine grid, and write a CSV with columns for each level.
- * @param pressures Vector of pressure MultiFabs (coarse to fine)
- * @param geoms Vector of Geometries (coarse to fine)
+ * @param level_data Vector of LevelData objects (coarse to fine)
  * @param filename Output CSV filename
  */
 void SamplePressureAlongLine(
-    const amrex::Vector<amrex::MultiFab>& pressures,
-    const amrex::Vector<amrex::Geometry>& geoms,
+    const std::vector<LevelData>& level_data,
     const std::string& filename);
 
 void CheckResults(
@@ -61,19 +69,16 @@ void CheckResults(
 
 // Comparison utilities
 /**
- * @brief Compare a reference MultiFab against a vector of MultiFabs at different AMR levels
- * @param expected_mf Reference MultiFab to compare against
- * @param level_mfs Vector of MultiFabs at different AMR levels
- * @param expected_geom Geometry for the reference MultiFab
- * @param level_geoms Vector of Geometries for each AMR level
- * @param name Name of the field being compared (for output)
+ * @brief Compare a reference LevelData against a vector of LevelData at different AMR levels
+ * @param expected_level Reference LevelData to compare against
+ * @param level_data Vector of LevelData at different AMR levels
  */
 void CompareMultiFabs(
-    const amrex::MultiFab& expected_mf,
-    const amrex::Vector<amrex::MultiFab>& level_mfs,
-    const amrex::Geometry& expected_geom,
-    const amrex::Vector<amrex::Geometry>& level_geoms,
-    const std::string& name);
+    const LevelData& expected_level,
+    const std::vector<LevelData>& level_data);
+
+LevelData MakeDenseLevelData(int n, amrex::Real domain_length);
+std::vector<LevelData> MakeDenseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length);
 
 /*--------------------------------------------------------------------
   End of file
