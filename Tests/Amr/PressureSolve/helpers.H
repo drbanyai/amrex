@@ -15,19 +15,18 @@
 struct LevelData {
     LevelData(int n, amrex::Real domain_length);
     const amrex::Geometry geom;
-    const amrex::BoxArray ba;
-    const amrex::DistributionMapping dm;
     amrex::MultiFab pressure;
     std::array<amrex::MultiFab, 3> velocity;
-};
 
 /*--------------------------------------------------------------------
   public free function declarations
   --------------------------------------------------------------------*/
+};
 
 // Geometry and mesh setup
 amrex::Geometry DefineGeometry(int nx, int ny, int nz, double dx);
 amrex::BoxArray DefineBoxArray(int nx, int ny, int nz);
+amrex::BoxArray DefineSparseBoxArray(int nx, int ny, int nz);
 amrex::DistributionMapping DefineDM(const amrex::BoxArray& ba);
 
 // Data structure setup
@@ -78,8 +77,9 @@ void CompareMultiFabs(
     const std::vector<LevelData>& level_data);
 
 LevelData MakeDenseLevelData(int n, amrex::Real domain_length);
+LevelData MakeSparseLevelData(int n, amrex::Real domain_length);
 std::vector<LevelData> MakeDenseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length);
-
+std::vector<LevelData> MakeSparseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length);
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 

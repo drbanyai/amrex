@@ -43,7 +43,7 @@ int MyMain()
     LevelData fine_level = MakeDenseLevelData(fine_n, domain_length);
 
     // Loop over levels: setup geometry, mesh, fields
-    std::vector<LevelData> composite_levels = MakeDenseCompositeLevels(base_n, nlevels, domain_length);
+    std::vector<LevelData> composite_levels = MakeSparseCompositeLevels(base_n, nlevels, domain_length);
 
     // Work with fine-level data
     amrex::Print() << "\nComplete fine solution, domain: " << fine_level.geom.Domain() << ", dx = " << fine_level.geom.CellSize()[0] << "\n";

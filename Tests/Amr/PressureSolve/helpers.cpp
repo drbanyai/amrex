@@ -130,6 +130,13 @@ amrex::BoxArray DefineBoxArray(int nx, int ny, int nz)
     return amrex::BoxArray(domain);
 }
 
+amrex::BoxArray DefineSparseBoxArray(int nx, int ny, int nz)
+{
+    const amrex::Box domain(amrex::IntVect(nx/4, ny/4, nz/4),
+                           amrex::IntVect(3*nx/4 - 1, 3*ny/4 - 1, 3*nz/4 - 1));
+    return amrex::BoxArray(domain);
+}
+
 amrex::DistributionMapping DefineDM(const amrex::BoxArray& ba)
 {
     return amrex::DistributionMapping(ba);
@@ -664,16 +671,26 @@ static amrex::Real ComputeResidual(
 }
 
 LevelData::LevelData(int n, amrex::Real domain_length)
-    : geom(DefineGeometry(n, n, n, domain_length / n)),
-      ba(DefineBoxArray(n, n, n)),
-      dm(DefineDM(ba))
+    : geom(DefineGeometry(n, n, n, domain_length / n))
 {
 }
 
 LevelData MakeDenseLevelData(int n, amrex::Real domain_length)
 {
     LevelData level_data(n, domain_length);
-    DefineFABs(level_data.pressure, level_data.velocity, level_data.ba, level_data.dm);
+    const amrex::BoxArray ba = DefineBoxArray(n, n, n);
+    const amrex::DistributionMapping dm = DefineDM(ba);
+    DefineFABs(level_data.pressure, level_data.velocity, ba, dm);
+    InitializeVelocity(level_data.velocity, level_data.geom);
+    return level_data;
+}
+
+LevelData MakeSparseLevelData(int n, amrex::Real domain_length)
+{
+    LevelData level_data(n, domain_length);
+    const amrex::BoxArray ba = DefineSparseBoxArray(n, n, n);
+    const amrex::DistributionMapping dm = DefineDM(ba);
+    DefineFABs(level_data.pressure, level_data.velocity, ba, dm);
     InitializeVelocity(level_data.velocity, level_data.geom);
     return level_data;
 }
@@ -688,6 +705,19 @@ std::vector<LevelData> MakeDenseCompositeLevels(int base_n, int nlevels, amrex::
     return composite_levels;
 }
 
+std::vector<LevelData> MakeSparseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length)
+{
+    std::vector<LevelData> composite_levels;
+    for (int lev = 0; lev < nlevels; ++lev) {
+        int n = base_n * (1 << lev);
+        if (lev == 0) {
+            composite_levels.push_back(MakeDenseLevelData(n, domain_length));
+        } else {
+            composite_levels.push_back(MakeSparseLevelData(n, domain_length));
+        }
+    }
+    return composite_levels;
+}
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 
