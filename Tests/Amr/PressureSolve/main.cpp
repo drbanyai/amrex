@@ -78,8 +78,8 @@ int main(int argc, char** argv)
 int MyMain()
 {
     // Number of levels (AMR-ready, even if only single-level for now)
-    constexpr int nlevels = 1;
-    constexpr int base_n = 8;
+    constexpr int nlevels = 2;
+    constexpr int base_n = 4;
     constexpr amrex::Real domain_length = 1.0; // meters
     constexpr amrex::Real tolerance = 1.0e-6;
     constexpr amrex::Real omega = 1.0;
