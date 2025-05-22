@@ -425,6 +425,17 @@ void CompareMultiFabs(
         const auto& level_mf = level_mfs[lev];
         const auto& level_geom = level_geoms[lev];
 
+        // Check real boxes match
+        if ( !amrex::AlmostEqual(expected_geom.ProbDomain(), level_geom.ProbDomain()) ) {
+            amrex::Print() << "\nReal box mismatch at level " << lev << ":\n"
+                          << "  Expected: " << expected_geom.ProbDomain() << "\n"
+                          << "  Level:    " << level_geom.ProbDomain() << "\n";
+        }
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(amrex::AlmostEqual(expected_geom.ProbDomain(), level_geom.ProbDomain()),
+            "Real boxes must match between expected and level geometries");
+
+        amrex::Print() << "\nComparing " << name << " at level " << lev << ":\n";
+        
         // Skip levels where domains don't match
         if (expected_geom.Domain() != level_geom.Domain()) {
             amrex::Print() << "\nSkipping comparison at level " << lev 
@@ -434,8 +445,6 @@ void CompareMultiFabs(
             continue;
         }
 
-        amrex::Print() << "\nComparing " << name << " at level " << lev << ":\n";
-        
         // Create a copy of expected_mf with the same distribution mapping as level_mf
         amrex::MultiFab expected_remapped(level_mf.boxArray(), level_mf.DistributionMap(), 1, 0);
         expected_remapped.ParallelCopy(expected_mf);
