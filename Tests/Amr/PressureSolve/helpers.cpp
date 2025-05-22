@@ -493,6 +493,17 @@ void CompareMultiFabs(
         amrex::Print() << "  Maximum absolute difference: " << max_diff << "\n";
         amrex::Print() << "  L2 norm of difference: " << l2_diff << "\n";
         amrex::Print() << "  Cell volume: " << volume << "\n";
+
+        // Check if differences exceed tolerance
+        constexpr amrex::Real diff_tolerance = 1.0e-3;
+        if (max_diff > diff_tolerance) {
+            amrex::Print() << "\nWARNING: Maximum difference exceeds tolerance (" << diff_tolerance << ")!\n";
+        }
+        constexpr amrex::Real l2_tolerance = 1.0e-3;
+        if (l2_diff > l2_tolerance) {
+            amrex::Print() << "\nWARNING: L2 norm of difference exceeds tolerance (" << l2_tolerance << ")!\n";
+        }
+
     }
 }
 
