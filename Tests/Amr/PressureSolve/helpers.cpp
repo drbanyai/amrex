@@ -440,6 +440,7 @@ void CompareMultiFabs(
         amrex::MultiFab expected_remapped(level_mf.boxArray(), level_mf.DistributionMap(), 1, 0);
 
         if (expected_geom.Domain() == level_geom.Domain()) {
+            // TODO: Can this also use average_down()?
             expected_remapped.ParallelCopy(expected_mf);
         } else {
             // Calculate refinement ratio between expected and level geometries
@@ -451,12 +452,11 @@ void CompareMultiFabs(
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ratio[0] == ratio[1] && ratio[1] == ratio[2],
                 "Refinement ratio must be uniform in all dimensions");
 
-            // Skip levels where domains don't match
-            amrex::Print() << "\nSkipping comparison at level " << lev
-                           << " due to domain mismatch:\n"
-                           << "  Expected domain: " << expected_geom.Domain() << "\n"
-                           << "  Level domain: " << level_geom.Domain() << "\n";
-            continue;
+            // Average down (restrict) from fine to coarse grid
+            amrex::average_down(expected_mf, expected_remapped, 0, 1, ratio);
+
+            amrex::Print() << "\nRestricted expected data from fine grid (ratio=" 
+                          << ratio[0] << ") to coarse grid for level " << lev << "\n";
         }
 
         // Compute max absolute difference and L2 norm of difference
