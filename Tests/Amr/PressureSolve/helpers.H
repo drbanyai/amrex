@@ -60,11 +60,19 @@ void CheckResults(
     const amrex::Geometry& geom);
 
 // Comparison utilities
+/**
+ * @brief Compare a reference MultiFab against a vector of MultiFabs at different AMR levels
+ * @param expected_mf Reference MultiFab to compare against
+ * @param level_mfs Vector of MultiFabs at different AMR levels
+ * @param expected_geom Geometry for the reference MultiFab
+ * @param level_geoms Vector of Geometries for each AMR level
+ * @param name Name of the field being compared (for output)
+ */
 void CompareMultiFabs(
     const amrex::MultiFab& expected_mf,
-    const amrex::MultiFab& actual_mf,
+    const amrex::Vector<amrex::MultiFab>& level_mfs,
     const amrex::Geometry& expected_geom,
-    const amrex::Geometry& actual_geom,
+    const amrex::Vector<amrex::Geometry>& level_geoms,
     const std::string& name);
 
 /*--------------------------------------------------------------------

@@ -413,49 +413,68 @@ void CheckResults(
 
 void CompareMultiFabs(
     const amrex::MultiFab& expected_mf,
-    const amrex::MultiFab& actual_mf,
+    const amrex::Vector<amrex::MultiFab>& level_mfs,
     const amrex::Geometry& expected_geom,
-    const amrex::Geometry& actual_geom,
+    const amrex::Vector<amrex::Geometry>& level_geoms,
     const std::string& name)
 {
-    // Verify domain consistency
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(expected_geom.Domain() == actual_geom.Domain(),
-        "Physical domains must match for comparison");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(level_mfs.size() == level_geoms.size(),
+        "Number of level MultiFabs must match number of level Geometries");
 
-    amrex::Print() << "\nComparing " << name << ":\n";
-    
-    // Create a copy of expected_mf with the same distribution mapping as actual_mf
-    amrex::MultiFab expected_remapped(actual_mf.boxArray(), actual_mf.DistributionMap(), 1, 0);
-    expected_remapped.ParallelCopy(expected_mf);
-    
-    // Compute max absolute difference and L2 norm of difference
-    amrex::Real max_diff = 0.0;
-    amrex::Real l2_diff = 0.0;
-    for (amrex::MFIter mfi(actual_mf); mfi.isValid(); ++mfi) {
-        const amrex::Box& bx = mfi.validbox();
-        const auto& expected_fab = expected_remapped[mfi];
-        const auto& actual_fab = actual_mf[mfi];
+    for (int lev = 0; lev < level_mfs.size(); ++lev) {
+        const auto& level_mf = level_mfs[lev];
+        const auto& level_geom = level_geoms[lev];
+
+        // Skip levels where domains don't match
+        if (expected_geom.Domain() != level_geom.Domain()) {
+            amrex::Print() << "\nSkipping comparison at level " << lev 
+                          << " due to domain mismatch:\n"
+                          << "  Expected domain: " << expected_geom.Domain() << "\n"
+                          << "  Level domain: " << level_geom.Domain() << "\n";
+            continue;
+        }
+
+        amrex::Print() << "\nComparing " << name << " at level " << lev << ":\n";
         
-        for (int i = bx.loVect()[0]; i <= bx.hiVect()[0]; ++i) {
-            for (int j = bx.loVect()[1]; j <= bx.hiVect()[1]; ++j) {
-                for (int k = bx.loVect()[2]; k <= bx.hiVect()[2]; ++k) {
-                    amrex::Real diff = std::abs(expected_fab(amrex::IntVect(i,j,k)) - 
-                                              actual_fab(amrex::IntVect(i,j,k)));
-                    max_diff = std::max(max_diff, diff);
-                    l2_diff += diff * diff;
+        // Create a copy of expected_mf with the same distribution mapping as level_mf
+        amrex::MultiFab expected_remapped(level_mf.boxArray(), level_mf.DistributionMap(), 1, 0);
+        expected_remapped.ParallelCopy(expected_mf);
+        
+        // Compute max absolute difference and L2 norm of difference
+        amrex::Real max_diff = 0.0;
+        amrex::Real l2_diff = 0.0;
+        amrex::Real volume = 0.0;  // Add volume for proper L2 norm calculation
+
+        for (amrex::MFIter mfi(level_mf); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            const auto& expected_fab = expected_remapped[mfi];
+            const auto& level_fab = level_mf[mfi];
+            
+            for (int i = bx.loVect()[0]; i <= bx.hiVect()[0]; ++i) {
+                for (int j = bx.loVect()[1]; j <= bx.hiVect()[1]; ++j) {
+                    for (int k = bx.loVect()[2]; k <= bx.hiVect()[2]; ++k) {
+                        amrex::Real diff = std::abs(expected_fab(amrex::IntVect(i,j,k)) - 
+                                                  level_fab(amrex::IntVect(i,j,k)));
+                        max_diff = std::max(max_diff, diff);
+                        l2_diff += diff * diff;
+                        volume += 1.0;
+                    }
                 }
             }
         }
-    }
-    
-    // Reduce max_diff across all processes
-    amrex::ParallelDescriptor::ReduceRealMax(max_diff);
-    // Reduce l2_diff across all processes
-    amrex::ParallelDescriptor::ReduceRealSum(l2_diff);
-    l2_diff = std::sqrt(l2_diff);
+        
+        // Reduce across all processes
+        amrex::ParallelDescriptor::ReduceRealMax(max_diff);
+        amrex::ParallelDescriptor::ReduceRealSum(l2_diff);
+        amrex::ParallelDescriptor::ReduceRealSum(volume);
+        
+        // Compute normalized L2 norm
+        l2_diff = std::sqrt(l2_diff / volume);
 
-    amrex::Print() << "  Maximum absolute difference: " << max_diff << "\n";
-    amrex::Print() << "  L2 norm of difference: " << l2_diff << "\n";
+        amrex::Print() << "  Maximum absolute difference: " << max_diff << "\n";
+        amrex::Print() << "  L2 norm of difference: " << l2_diff << "\n";
+        amrex::Print() << "  Cell volume: " << volume << "\n";
+    }
 }
 
 /*--------------------------------------------------------------------

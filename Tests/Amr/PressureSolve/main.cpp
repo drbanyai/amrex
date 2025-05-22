@@ -81,14 +81,12 @@ int MyMain()
         InitializeVelocity(velocity[lev], geom[lev]);
         SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega);
         CheckResults(pressure[lev], velocity[lev], geom[lev]);
-
-        // Compare fine pressure with array pressure at finest level
-        if (lev == nlevels-1) { // TODO: Compare all
-            CompareMultiFabs(fine_pressure, pressure[lev], 
-                           fine_geom, geom[lev],
-                           "fine pressure with pressure at level " + std::to_string(lev));
-        }
     }
+
+    // Compare fine pressure with all levels
+    CompareMultiFabs(fine_pressure, pressure, 
+                    fine_geom, geom,
+                    "fine pressure with AMR levels");
 
     // Sample and output results for all levels to a combined CSV file
     SamplePressureAlongLine(pressure, geom, "pressure.csv");
