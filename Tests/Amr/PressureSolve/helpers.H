@@ -59,6 +59,14 @@ void CheckResults(
     const std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom);
 
+// Comparison utilities
+void CompareMultiFabs(
+    const amrex::MultiFab& expected_mf,
+    const amrex::MultiFab& actual_mf,
+    const amrex::Geometry& expected_geom,
+    const amrex::Geometry& actual_geom,
+    const std::string& name);
+
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 
