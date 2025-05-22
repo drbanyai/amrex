@@ -442,6 +442,15 @@ void CompareMultiFabs(
         if (expected_geom.Domain() == level_geom.Domain()) {
             expected_remapped.ParallelCopy(expected_mf);
         } else {
+            // Calculate refinement ratio between expected and level geometries
+            amrex::IntVect ratio = expected_geom.Domain().size() / level_geom.Domain().size();
+            
+            // Assert that expected_geom is a refined version of level_geom
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ratio[0] >= 1 && ratio[1] >= 1 && ratio[2] >= 1,
+                "Expected geometry must be refined version of level geometry");
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ratio[0] == ratio[1] && ratio[1] == ratio[2],
+                "Refinement ratio must be uniform in all dimensions");
+
             // Skip levels where domains don't match
             amrex::Print() << "\nSkipping comparison at level " << lev
                            << " due to domain mismatch:\n"
