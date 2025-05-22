@@ -52,6 +52,8 @@ int MyMain()
 
     // Work with fine-level data
     InitializeVelocity(fine_velocity, fine_geom);
+    amrex::Print() << "\nComplete fine solution, domain: " << fine_geom.Domain() << ", dx = " << fine_geom.CellSize()[0] << "\n";
+    amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
     SolvePressure(fine_pressure, fine_velocity, fine_geom, tolerance, max_iterations, omega);
     CheckResults(fine_pressure, fine_velocity, fine_geom);
 
@@ -73,12 +75,13 @@ int MyMain()
         ba[lev] = DefineBoxArray(n, n, n);
         dm[lev] = DefineDM(ba[lev]);
         DefineFABs(pressure[lev], velocity[lev], ba[lev], dm[lev]);
-
-        amrex::Print() << "\nLevel " << lev << ": domain size " << n << "x" << n << "x" << n << ", dx = " << dx << "\n";
-        amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
-
-        // Velocity initialization, pressure solve, diagnostics
         InitializeVelocity(velocity[lev], geom[lev]);
+    }
+
+    // Loop over levels: solve and check results
+    for (int lev = 0; lev < nlevels; ++lev) {
+        amrex::Print() << "\nLevel: " << lev << ", domain: " << geom[lev].Domain() << ", dx = " << geom[lev].CellSize()[0] << "\n";
+        amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
         SolvePressure(pressure[lev], velocity[lev], geom[lev], tolerance, max_iterations, omega);
         CheckResults(pressure[lev], velocity[lev], geom[lev]);
     }
