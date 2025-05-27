@@ -56,6 +56,12 @@ int MyMain()
     for (int lev = 0; lev < nlevels; ++lev) {
         amrex::Print() << "\nLevel: " << lev << ", domain: " << composite_levels[lev].geom.Domain() << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
         amrex::Print() << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations << ", Relaxation: " << omega << "\n";
+        
+        // Fill ghost cells for pressure from coarser level
+        if (lev > 0) {
+            FillPressureGhostCells(composite_levels[lev], composite_levels[lev-1]);
+        }
+        
         SolvePressure(composite_levels[lev].pressure, composite_levels[lev].velocity, composite_levels[lev].geom, tolerance, max_iterations, omega);
         CheckResults(composite_levels[lev].pressure, composite_levels[lev].velocity, composite_levels[lev].geom);
     }

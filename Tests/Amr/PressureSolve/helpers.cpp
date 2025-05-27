@@ -718,6 +718,66 @@ std::vector<LevelData> MakeSparseCompositeLevels(int base_n, int nlevels, amrex:
     }
     return composite_levels;
 }
+
+void FillPressureGhostCells(LevelData& fine_level, const LevelData& crse_level)
+{
+    // Set up boundary conditions for pressure
+    amrex::Vector<amrex::BCRec> bcs(1);  // One component for pressure
+    for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+        bcs[0].setLo(idim, amrex::BCType::ext_dir);
+        bcs[0].setHi(idim, amrex::BCType::ext_dir);
+    }
+
+    // Create boundary condition functors
+    PressureBndryFunc cbc;  // No constructor parameters needed
+    PressureBndryFunc fbc;  // No constructor parameters needed
+    amrex::PhysBCFunct<PressureBndryFunc> cphysbc(crse_level.geom, bcs, cbc);
+    amrex::PhysBCFunct<PressureBndryFunc> fphysbc(fine_level.geom, bcs, fbc);
+
+    // Create or reuse FillPatcher if not already initialized
+    if (!fine_level.fillpatcher) {
+        const amrex::IntVect nghost(1);  // Number of ghost cells to fill
+        const int ncomp = 1;  // One component for pressure
+        fine_level.fillpatcher = std::make_unique<amrex::FillPatcher<amrex::MultiFab>>(
+            fine_level.pressure.boxArray(),
+            fine_level.pressure.DistributionMap(),
+            fine_level.geom,
+            crse_level.pressure.boxArray(),
+            crse_level.pressure.DistributionMap(),
+            crse_level.geom,
+            nghost,
+            ncomp,
+            &amrex::pc_interp
+        );
+    }
+
+    // Fill ghost cells using FillPatcher
+    const amrex::IntVect nghost(1);
+    const amrex::Real time = 0.0;  // Time is not used in this case
+    amrex::Vector<amrex::MultiFab*> cmf = {const_cast<amrex::MultiFab*>(&crse_level.pressure)};
+    amrex::Vector<amrex::Real> ct = {time};
+    amrex::Vector<amrex::MultiFab*> fmf = {&fine_level.pressure};
+    amrex::Vector<amrex::Real> ft = {time};
+
+    fine_level.fillpatcher->fill(
+        fine_level.pressure,  // Destination
+        nghost,              // Number of ghost cells to fill
+        time,                // Time
+        cmf,                 // Coarse level data
+        ct,                  // Coarse level times
+        fmf,                 // Fine level data
+        ft,                  // Fine level times
+        0,                   // Source component
+        0,                   // Destination component
+        1,                   // Number of components
+        cphysbc,            // Coarse level boundary conditions
+        0,                   // Coarse level boundary condition component
+        fphysbc,            // Fine level boundary conditions
+        0,                   // Fine level boundary condition component
+        bcs,                // Boundary conditions
+        0                   // Boundary condition component
+    );
+}
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 

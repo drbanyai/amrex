@@ -6,10 +6,12 @@
 #include <AMReX_BCRec.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
+#include <AMReX_FillPatcher.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Vector.H>
 #include <array>
+#include <memory>
 #include <vector>
 
 struct LevelData {
@@ -17,6 +19,7 @@ struct LevelData {
     const amrex::Geometry geom;
     amrex::MultiFab pressure;
     std::array<amrex::MultiFab, 3> velocity;
+    std::unique_ptr<amrex::FillPatcher<amrex::MultiFab>> fillpatcher;
 
 /*--------------------------------------------------------------------
   public free function declarations
@@ -80,6 +83,12 @@ LevelData MakeDenseLevelData(int n, amrex::Real domain_length);
 LevelData MakeSparseLevelData(int n, amrex::Real domain_length);
 std::vector<LevelData> MakeDenseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length);
 std::vector<LevelData> MakeSparseCompositeLevels(int base_n, int nlevels, amrex::Real domain_length);
+
+// Fill ghost cells for pressure field between AMR levels
+void FillPressureGhostCells(
+    LevelData& fine_level,
+    const LevelData& crse_level);
+
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 
