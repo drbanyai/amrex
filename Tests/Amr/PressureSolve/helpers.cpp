@@ -11,6 +11,12 @@
 #include <AMReX_PhysBCFunct.H>
 #include <AMReX_FillPatchUtil.H>
 #include <AMReX_Interpolater.H>
+#include <AMReX_Config.H>
+#include <AMReX_MultiFab.H>
+#include <AMReX_Geometry.H>
+#include <AMReX_ParmParse.H>
+#include <AMReX_Print.H>
+#include <AMReX_FluxRegister.H>
 
 /*--------------------------------------------------------------------
   defines and static variables
@@ -807,62 +813,91 @@ void SolvePressureCorrection(
     int max_iterations,
     amrex::Real omega)
 {
-    // TODO: Calculate flux mismatch between coarse and fine levels
-    // TODO: Calculate correction solve on coarse level
-    // TODO: Add correction to coarse level
     // Calculate refinement ratio
     amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
     AMREX_ALWAYS_ASSERT(ratio[0] == ratio[1] && ratio[1] == ratio[2]);  // Uniform refinement
 
-    // Create a temporary MultiFab to store the averaged fine pressure
-    amrex::MultiFab avg_fine_pressure(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 0);
+    // Create a FluxRegister to handle flux mismatches
+    amrex::FluxRegister flux_reg(fine_pressure.boxArray(),
+                                 fine_pressure.DistributionMap(),
+                                 ratio,
+                                 fine_geom.Domain().smallEnd()[0], // What is this?
+                                  1);
 
-    // Average down fine pressure to coarse grid
-    amrex::average_down(fine_pressure, avg_fine_pressure, 0, 1, ratio);
+    // Create temporary MultiFabs to store fluxes
+    amrex::MultiFab crse_flux[AMREX_SPACEDIM];
+    amrex::MultiFab fine_flux[AMREX_SPACEDIM];
+    for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+        // Create face-centered flux MultiFabs
+        amrex::BoxArray ba_crse = amrex::convert(crse_pressure.boxArray(), amrex::IntVect::TheDimensionVector(dir));
+        amrex::BoxArray ba_fine = amrex::convert(fine_pressure.boxArray(), amrex::IntVect::TheDimensionVector(dir));
+        crse_flux[dir].define(ba_crse, crse_pressure.DistributionMap(), 1, 0);
+        fine_flux[dir].define(ba_fine, fine_pressure.DistributionMap(), 1, 0);
+    }
 
-    // Compute correction as difference between averaged fine and coarse pressure
-    amrex::MultiFab correction(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 0);
-    amrex::MultiFab::Copy(correction, avg_fine_pressure, 0, 0, 1, 0);  // Copy averaged fine pressure
-    amrex::MultiFab::Subtract(correction, crse_pressure, 0, 0, 1, 0);  // Subtract coarse pressure
+    // Compute fluxes on both levels
+    const amrex::Real dx_crse = crse_geom.CellSize(0);
+    const amrex::Real dx_fine = fine_geom.CellSize(0);
+    const amrex::Real dxinv_crse = 1.0 / dx_crse;
+    const amrex::Real dxinv_fine = 1.0 / dx_fine;
 
-    // Compute divergence of correction field
-    amrex::MultiFab correction_div(correction.boxArray(), correction.DistributionMap(), 1, 0);
-    correction_div.setVal(0.0);  // Initialize to zero
-
-    // Compute divergence using central differences
-    const amrex::Real dx = crse_geom.CellSize(0);
-    const amrex::Real dxinv = 1.0 / dx;
-
-    for (amrex::MFIter mfi(correction_div); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& box = mfi.validbox();
-        const auto& div_arr = correction_div.array(mfi);
-        const auto& corr_arr = correction.array(mfi);
-
-        const auto lo = amrex::lbound(box);
-        const auto hi = amrex::ubound(box);
-
-        for (int i = lo.x; i <= hi.x; ++i)
-        {
-            for (int j = lo.y; j <= hi.y; ++j)
-            {
-                for (int k = lo.z; k <= hi.z; ++k)
-                {
-                    // Compute divergence using central differences
-                    div_arr(i, j, k) = dxinv * (
-                        corr_arr(i + 1, j, k) - corr_arr(i - 1, j, k) +
-                        corr_arr(i, j + 1, k) - corr_arr(i, j - 1, k) +
-                        corr_arr(i, j, k + 1) - corr_arr(i, j, k - 1)) / (2.0 * AMREX_SPACEDIM);
+    // Compute coarse fluxes
+    for (amrex::MFIter mfi(crse_pressure); mfi.isValid(); ++mfi) {
+        const auto &pres_arr = crse_pressure.const_array(mfi);
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+            const amrex::Box& bx = crse_flux[dir][mfi].box();
+            const auto& flux_arr = crse_flux[dir].array(mfi);
+            
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                // Compute flux using central differences
+                if (dir == 0) {
+                    flux_arr(i,j,k) = dxinv_crse * (pres_arr(i,j,k) - pres_arr(i-1,j,k));
+                } else if (dir == 1) {
+                    flux_arr(i,j,k) = dxinv_crse * (pres_arr(i,j,k) - pres_arr(i,j-1,k));
+                } else {
+                    flux_arr(i,j,k) = dxinv_crse * (pres_arr(i,j,k) - pres_arr(i,j,k-1));
                 }
-            }
+            });
         }
     }
 
-    // Solve for correction using the same solver as pressure
-    amrex::MultiFab correction_solution(correction.boxArray(), correction.DistributionMap(), 1, 0);
-    correction_solution.setVal(0.0);  // Initialize to zero
+    // Compute fine fluxes
+    for (amrex::MFIter mfi(fine_pressure); mfi.isValid(); ++mfi) {
+        const auto &pres_arr = fine_pressure.const_array(mfi);
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+            const amrex::Box& bx = fine_flux[dir][mfi].box();
+            const auto& flux_arr = fine_flux[dir].array(mfi);
+            
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                // Compute flux using central differences
+                if (dir == 0) {
+                    flux_arr(i,j,k) = dxinv_fine * (pres_arr(i,j,k) - pres_arr(i-1,j,k));
+                } else if (dir == 1) {
+                    flux_arr(i,j,k) = dxinv_fine * (pres_arr(i,j,k) - pres_arr(i,j-1,k));
+                } else {
+                    flux_arr(i,j,k) = dxinv_fine * (pres_arr(i,j,k) - pres_arr(i,j,k-1));
+                }
+            });
+        }
+    }
 
-    // Use the same iteration solver as pressure
+    // Add fluxes to the register
+    for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+        // TODO: Should this use CrseInit?
+        flux_reg.CrseAdd(crse_flux[dir], dir, 0, 0, 1, -1.0, crse_geom);
+        flux_reg.FineAdd(fine_flux[dir], dir, 0, 0, 1, 1.0);
+    }
+
+    // Create correction MultiFab and divergence MultiFab
+    amrex::MultiFab correction_solution(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 1);
+    amrex::MultiFab correction_div(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 0);
+    correction_solution.setVal(0.0);
+    correction_div.setVal(0.0);
+
+    // Apply flux corrections - this computes the divergence of the flux mismatches
+    flux_reg.Reflux(correction_div, 1.0, 0, 0, 1, crse_geom);
+
+    // Solve for the correction using the divergence as the right-hand side
     SolvePressureIterations(correction_solution, correction_div, crse_geom, tolerance, max_iterations, omega);
 
     // Add correction to coarse pressure
