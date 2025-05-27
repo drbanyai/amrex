@@ -62,7 +62,21 @@ int MyMain()
             FillPressureGhostCells(composite_levels[lev], composite_levels[lev-1]);
         }
         
+        // Fine-level solve
         SolvePressure(composite_levels[lev].pressure, composite_levels[lev].velocity, composite_levels[lev].geom, tolerance, max_iterations, omega);
+
+        if (lev > 0) {
+          // TODO: Calculate flux mismatch between coarse and fine levels
+          // TODO: Calculate correction solve on coarse level
+          // TODO: Add correction to coarse level
+          // TODO: Fill fine ghosts from coarse level
+          // TODO: Re-solve fine level
+        }
+    }
+
+    amrex::Print() << "\nChecking results for all levels\n";
+    for (int lev = 0; lev < nlevels; ++lev) {
+        amrex::Print() << "\nLevel: " << lev << ", domain: " << composite_levels[lev].geom.Domain() << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
         CheckResults(composite_levels[lev].pressure, composite_levels[lev].velocity, composite_levels[lev].geom);
     }
 
