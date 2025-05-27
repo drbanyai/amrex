@@ -108,6 +108,14 @@ static void ComputeDivergence(
     const std::array<amrex::MultiFab, 3>& velocity,
     const amrex::Geometry& geom);
 
+static void SolvePressureIterations(
+    amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom,
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega);
+
 /*--------------------------------------------------------------------
   public free function definitions
   --------------------------------------------------------------------*/
@@ -349,23 +357,8 @@ void SolvePressure(
     // Initialize pressure to zero
     pressure.setVal(0.0);
 
-    // Solve for pressure
-    amrex::Real residual = 1.0;
-    int iteration = 0;
-
-    while (residual > tolerance && iteration < max_iterations)
-    {
-        GaussSeidelIteration(pressure, divergence, geom, omega, iteration);
-        residual = ComputeResidual(pressure, divergence, geom);
-        iteration++;
-
-        if ((max_iterations < 100) || (iteration % 10 == 0))
-        {
-            amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
-        }
-    }
-
-    amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
+    // Solve for pressure using iterations
+    SolvePressureIterations(pressure, divergence, geom, tolerance, max_iterations, omega);
 }
 
 void CheckResults(
@@ -668,6 +661,32 @@ static amrex::Real ComputeResidual(
     amrex::ParallelDescriptor::ReduceRealSum(volume);
 
     return std::sqrt(residual / volume);
+}
+
+static void SolvePressureIterations(
+    amrex::MultiFab& pressure,
+    const amrex::MultiFab& divergence,
+    const amrex::Geometry& geom,
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega)
+{
+    amrex::Real residual = 1.0;
+    int iteration = 0;
+
+    while (residual > tolerance && iteration < max_iterations)
+    {
+        GaussSeidelIteration(pressure, divergence, geom, omega, iteration);
+        residual = ComputeResidual(pressure, divergence, geom);
+        iteration++;
+
+        if ((max_iterations < 100) || (iteration % 10 == 0))
+        {
+            amrex::Print() << "Iteration " << iteration << ", residual = " << residual << "\n";
+        }
+    }
+
+    amrex::Print() << "Final iteration " << iteration << ", residual = " << residual << "\n";
 }
 
 LevelData::LevelData(int n, amrex::Real domain_length)
