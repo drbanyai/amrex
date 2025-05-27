@@ -89,6 +89,16 @@ void FillPressureGhostCells(
     LevelData& fine_level,
     const LevelData& crse_level);
 
+// Solve for pressure correction between AMR levels
+void SolvePressureCorrection(
+    amrex::MultiFab& crse_pressure,
+    const amrex::MultiFab& fine_pressure,
+    const amrex::Geometry& crse_geom,
+    const amrex::Geometry& fine_geom,
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega);
+
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/ 

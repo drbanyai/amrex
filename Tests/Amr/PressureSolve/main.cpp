@@ -66,9 +66,13 @@ int MyMain()
         SolvePressure(composite_levels[lev].pressure, composite_levels[lev].velocity, composite_levels[lev].geom, tolerance, max_iterations, omega);
 
         if (lev > 0) {
-          // TODO: Calculate flux mismatch between coarse and fine levels
-          // TODO: Calculate correction solve on coarse level
-          // TODO: Add correction to coarse level
+          SolvePressureCorrection(composite_levels[lev-1].pressure,
+                                  composite_levels[lev].pressure,
+                                  composite_levels[lev-1].geom,
+                                  composite_levels[lev].geom,
+                                  tolerance,
+                                  max_iterations,
+                                  omega);
           // TODO: Fill fine ghosts from coarse level
           // TODO: Re-solve fine level
         }

@@ -106,8 +106,8 @@ static amrex::Real ComputeResidual(
 static void ComputeDivergence(
     amrex::MultiFab& divergence,
     const std::array<amrex::MultiFab, 3>& velocity,
-    const amrex::Geometry& geom);
 
+    const amrex::Geometry& geom);
 static void SolvePressureIterations(
     amrex::MultiFab& pressure,
     const amrex::MultiFab& divergence,
@@ -796,6 +796,117 @@ void FillPressureGhostCells(LevelData& fine_level, const LevelData& crse_level)
         bcs,                // Boundary conditions
         0                   // Boundary condition component
     );
+}
+
+void SolvePressureCorrection(
+    amrex::MultiFab& crse_pressure,
+    const amrex::MultiFab& fine_pressure,
+    const amrex::Geometry& crse_geom,
+    const amrex::Geometry& fine_geom,
+    amrex::Real tolerance,
+    int max_iterations,
+    amrex::Real omega)
+{
+    // TODO: Calculate flux mismatch between coarse and fine levels
+    // TODO: Calculate correction solve on coarse level
+    // TODO: Add correction to coarse level
+    // Calculate refinement ratio
+    amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
+    AMREX_ALWAYS_ASSERT(ratio[0] == ratio[1] && ratio[1] == ratio[2]);  // Uniform refinement
+
+    // Create a temporary MultiFab to store the averaged fine pressure
+    amrex::MultiFab avg_fine_pressure(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 0);
+
+    // Average down fine pressure to coarse grid
+    amrex::average_down(fine_pressure, avg_fine_pressure, 0, 1, ratio);
+
+    // Compute correction as difference between averaged fine and coarse pressure
+    amrex::MultiFab correction(crse_pressure.boxArray(), crse_pressure.DistributionMap(), 1, 0);
+    amrex::MultiFab::Copy(correction, avg_fine_pressure, 0, 0, 1, 0);  // Copy averaged fine pressure
+    amrex::MultiFab::Subtract(correction, crse_pressure, 0, 0, 1, 0);  // Subtract coarse pressure
+
+    // Compute divergence of correction field
+    amrex::MultiFab correction_div(correction.boxArray(), correction.DistributionMap(), 1, 0);
+    correction_div.setVal(0.0);  // Initialize to zero
+
+    // Compute divergence using central differences
+    const amrex::Real dx = crse_geom.CellSize(0);
+    const amrex::Real dxinv = 1.0 / dx;
+
+    for (amrex::MFIter mfi(correction_div); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& div_arr = correction_div.array(mfi);
+        const auto& corr_arr = correction.array(mfi);
+
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+
+        for (int i = lo.x; i <= hi.x; ++i)
+        {
+            for (int j = lo.y; j <= hi.y; ++j)
+            {
+                for (int k = lo.z; k <= hi.z; ++k)
+                {
+                    // Compute divergence using central differences
+                    div_arr(i, j, k) = dxinv * (
+                        corr_arr(i + 1, j, k) - corr_arr(i - 1, j, k) +
+                        corr_arr(i, j + 1, k) - corr_arr(i, j - 1, k) +
+                        corr_arr(i, j, k + 1) - corr_arr(i, j, k - 1)) / (2.0 * AMREX_SPACEDIM);
+                }
+            }
+        }
+    }
+
+    // Solve for correction using the same solver as pressure
+    amrex::MultiFab correction_solution(correction.boxArray(), correction.DistributionMap(), 1, 0);
+    correction_solution.setVal(0.0);  // Initialize to zero
+
+    // Use the same iteration solver as pressure
+    SolvePressureIterations(correction_solution, correction_div, crse_geom, tolerance, max_iterations, omega);
+
+    // Add correction to coarse pressure
+    amrex::MultiFab::Add(crse_pressure, correction_solution, 0, 0, 1, 0);
+
+    // Print statistics about the correction
+    amrex::Real max_correction = 0.0;
+    amrex::Real avg_correction = 0.0;
+    amrex::Real volume = 0.0;
+
+    for (amrex::MFIter mfi(correction_solution); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        const auto& corr_arr = correction_solution.array(mfi);
+
+        const auto lo = amrex::lbound(box);
+        const auto hi = amrex::ubound(box);
+
+        for (int i = lo.x; i <= hi.x; ++i)
+        {
+            for (int j = lo.y; j <= hi.y; ++j)
+            {
+                for (int k = lo.z; k <= hi.z; ++k)
+                {
+                    const amrex::Real corr = std::abs(corr_arr(i, j, k));
+                    max_correction = std::max(max_correction, corr);
+                    avg_correction += corr;
+                    volume += 1.0;
+                }
+            }
+        }
+    }
+
+    // Reduce across processors
+    amrex::ParallelDescriptor::ReduceRealMax(max_correction);
+    amrex::ParallelDescriptor::ReduceRealSum(avg_correction);
+    amrex::ParallelDescriptor::ReduceRealSum(volume);
+
+    avg_correction /= volume;
+
+    amrex::Print() << "\nPressure correction statistics:\n"
+                   << "  Maximum correction: " << max_correction << "\n"
+                   << "  Average correction: " << avg_correction << "\n"
+                   << "  Number of cells: " << volume << "\n";
 }
 /*--------------------------------------------------------------------
   End of file
