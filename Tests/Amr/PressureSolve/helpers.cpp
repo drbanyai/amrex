@@ -878,12 +878,13 @@ void SolvePressureCorrection(  //
   AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] &&
                        ratio[1] == ratio[2] );  // Uniform refinement
 
+  const int ignoredFineLevel = -1;
   // Create a FluxRegister to handle flux mismatches
   amrex::FluxRegister flux_reg(  //
     fine_pressure.boxArray(),
     fine_pressure.DistributionMap(),
     ratio,
-    fine_geom.Domain().smallEnd()[0],  // TODO: What is this?
+    ignoredFineLevel,
     1 );
 
   // Create temporary MultiFabs to store fluxes
@@ -955,8 +956,7 @@ void SolvePressureCorrection(  //
 
   // Add fluxes to the register
   for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
-    // TODO: Should this use CrseInit?
-    flux_reg.CrseAdd( crse_flux[dir], dir, 0, 0, 1, -1.0, crse_geom );
+    flux_reg.CrseInit( crse_flux[dir], dir, 0, 0, 1, -1.0 );
     flux_reg.FineAdd( fine_flux[dir], dir, 0, 0, 1, 1.0 );
   }
 
