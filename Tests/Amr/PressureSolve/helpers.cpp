@@ -237,7 +237,8 @@ void InitializeVelocity(  //
 
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
-  const std::string& filename )
+  const std::string& filename,
+  const LevelData& fullFineSolution )
 {
   const int finest_lev = static_cast<int>( level_data.size() ) - 1;
   const amrex::Geometry& fine_geom = level_data[finest_lev].geom;
@@ -290,16 +291,16 @@ void SamplePressureAlongLine(  //
   };
 
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    // Define MultiFab with same structure as level_data[finest_lev].pressure
+    // Define MultiFab with same structure as full fine pressure.
     fine_level_pressure[lev].define(  //
-      level_data[finest_lev].pressure.boxArray(),
-      level_data[finest_lev].pressure.DistributionMap(),
-      level_data[finest_lev].pressure.nComp(),
-      level_data[finest_lev].pressure.nGrow() );
+      fullFineSolution.pressure.boxArray(),
+      fullFineSolution.pressure.DistributionMap(),
+      fullFineSolution.pressure.nComp(),
+      fullFineSolution.pressure.nGrow() );
 
     if ( lev == finest_lev ) {
       // Copy data from level_data[finest_lev].pressure
-      fine_level_pressure[lev].ParallelCopy( level_data[finest_lev].pressure );
+      fine_level_pressure[lev].ParallelCopy( level_data[lev].pressure );
     } else {
       // Interpolate from coarse level to finest grid
       InterpFromCoarseToFineSimple(  //

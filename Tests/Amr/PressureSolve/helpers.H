@@ -65,7 +65,8 @@ void SolvePressure(  //
  */
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
-  const std::string& filename );
+  const std::string& filename,
+  const LevelData& fullFineSolution );
 
 void CheckResults(  //
   const amrex::MultiFab& pressure,

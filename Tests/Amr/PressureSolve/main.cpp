@@ -121,7 +121,7 @@ int MyMain()
   CompareMultiFabs( fine_level, composite_levels );
 
   // Sample and output results for all levels to a combined CSV file
-  SamplePressureAlongLine( composite_levels, "pressure.csv" );
+  SamplePressureAlongLine( composite_levels, "pressure.csv", fine_level );
 
   return 0;
 }
