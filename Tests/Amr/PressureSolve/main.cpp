@@ -66,7 +66,7 @@ int MyMain()
   CheckResults( fine_level.pressure, fine_level.velocity, fine_level.geom );
 
   // Loop over levels: solve and check results
-  // TODO: Need to implement full composite solve
+  // TODO: Need to implement recursive composite solve
   for ( int lev = 0; lev < nlevels; ++lev ) {
     amrex::Print()  //
       << "\nLevel: " << lev
@@ -82,7 +82,7 @@ int MyMain()
                               composite_levels[lev - 1] );
     }
 
-    // Fine-level solve
+    // Single fine-level solve
     SolvePressure(  //
       composite_levels[lev].pressure,
       composite_levels[lev].velocity,
@@ -92,6 +92,7 @@ int MyMain()
       omega );
 
     if ( lev > 0 ) {
+      // Calculate and apply the correction to the coarser level
       SolvePressureCorrection(  //
         composite_levels[lev - 1].pressure,
         composite_levels[lev].pressure,
@@ -100,8 +101,17 @@ int MyMain()
         tolerance,
         max_iterations,
         omega );
-      // TODO: Fill fine ghosts from coarse level
-      // TODO: Re-solve fine level
+      // Fill fine ghosts from coarse level
+      FillPressureGhostCells( composite_levels[lev],
+                              composite_levels[lev - 1] );
+      // Re-solve fine level
+      SolvePressure(  //
+        composite_levels[lev].pressure,
+        composite_levels[lev].velocity,
+        composite_levels[lev].geom,
+        tolerance,
+        max_iterations,
+        omega );
     }
   }
 

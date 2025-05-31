@@ -299,7 +299,13 @@ void SamplePressureAlongLine(  //
       fullFineSolution.pressure.nGrow() );
 
     if ( lev == finest_lev ) {
-      // Copy data from level_data[finest_lev].pressure
+      // Initialize data outside the fine FAB and then overwrite the data inside
+      // the FAB
+      InterpFromCoarseToFineSimple(  //
+        fine_level_pressure[lev],
+        level_data[lev - 1].pressure,
+        level_data[lev - 1].geom,
+        level_data[lev].geom );
       fine_level_pressure[lev].ParallelCopy( level_data[lev].pressure );
     } else {
       // Interpolate from coarse level to finest grid
@@ -974,9 +980,19 @@ void SolvePressureCorrection(  //
   correction_solution.setVal( 0.0 );
   correction_div.setVal( 0.0 );
 
+  // Fix issue with scaling. TODO: Should we be calculating fluxes differently?
+  amrex::MultiFab volumes(  //
+    correction_div.boxArray(),
+    correction_div.DistributionMap(),
+    1,
+    0 );
+  volumes = 1.0;
+
   // Apply flux corrections - this computes the divergence of the flux
   // mismatches
-  flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
+  for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
+    flux_reg.Reflux( correction_div, volumes, dir, 1.0, 0, 0, 1, crse_geom );
+  }
 
   // Solve for the correction using the divergence as the right-hand side
   SolvePressureIterations(  //
