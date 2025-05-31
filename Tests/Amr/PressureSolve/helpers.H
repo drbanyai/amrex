@@ -43,7 +43,8 @@ void DefineFABs(  //
 // Initialization
 void InitializeVelocity(  //
   std::array<amrex::MultiFab, 3>& velocity,
-  const amrex::Geometry& geom );
+  const amrex::Geometry& geom,
+  int fineN );
 
 // Main pressure solver function
 void SolvePressure(  //
@@ -51,7 +52,8 @@ void SolvePressure(  //
   const std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,
   amrex::Real tolerance,
-  int max_iterations );
+  int max_iterations,
+  int fineN );
 
 // Verification
 // Multi-level sampling and CSV output
@@ -65,11 +67,13 @@ void SolvePressure(  //
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const std::string& filename,
-  const LevelData& fullFineSolution );
+  const LevelData& fullFineSolution,
+  int fineN );
 
 void CheckResults(  //
   const amrex::MultiFab& pressure,
-  const amrex::Geometry& geom );
+  const amrex::Geometry& geom,
+  int fineN );
 
 // Comparison utilities
 /**
@@ -82,21 +86,19 @@ void CompareMultiFabs(  //
   const LevelData& expected_level,
   const std::vector<LevelData>& level_data );
 
-LevelData MakeDenseLevelData( int n, amrex::Real domain_length );
-LevelData MakeSparseLevelData( int n, amrex::Real domain_length );
-std::vector<LevelData> MakeDenseCompositeLevels(  //
-  int base_n,
-  int nlevels,
-  amrex::Real domain_length );
+LevelData MakeDenseLevelData( int n, amrex::Real domain_length, int fineN );
+LevelData MakeSparseLevelData( int n, amrex::Real domain_length, int fineN );
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
-  amrex::Real domain_length );
+  amrex::Real domain_length,
+  int fineN );
 
 // Fill ghost cells for pressure field between AMR levels
 void FillPressureGhostCells(  //
   LevelData& fine_level,
-  const LevelData& crse_level );
+  const LevelData& crse_level,
+  int fineN );
 
 // Solve for pressure correction between AMR levels
 void SolvePressureCorrection(  //
@@ -105,7 +107,8 @@ void SolvePressureCorrection(  //
   const amrex::Geometry& crse_geom,
   const amrex::Geometry& fine_geom,
   amrex::Real tolerance,
-  int max_iterations );
+  int max_iterations,
+  int fineN );
 
 /*--------------------------------------------------------------------
   End of file

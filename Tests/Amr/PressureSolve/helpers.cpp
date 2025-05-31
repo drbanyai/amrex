@@ -33,7 +33,8 @@ static amrex::Real ExpectedPressure(  //
   const amrex::Geometry& geom,
   int i,
   int j,
-  int k )
+  int k,
+  int fineN )
 {
   // Analytic solution for a dipole in infinite domain:
   // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
@@ -45,7 +46,6 @@ static amrex::Real ExpectedPressure(  //
   // between cells (coarse_face[0]-1, coarse_face[1], coarse_face[2]) and
   // (coarse_face[0], coarse_face[1], coarse_face[2])
   // Cell center of cell to the left of the face
-  constexpr int fineN = 8;
   const amrex::Real centerMinus = ( ( fineN / 2.0 ) - 0.5 ) / fineN;
   // Cell center of cell to the right of the face
   const amrex::Real centerPlus = ( ( fineN / 2.0 ) + 0.5 ) / fineN;
@@ -82,6 +82,8 @@ static amrex::Real ExpectedPressure(  //
 class PressureBndryFunc
 {
 public:
+  PressureBndryFunc( int fineN ) : vFineN( fineN ) {}
+
   void operator()(  //
     amrex::Box const& bx,
     amrex::FArrayBox& data,
@@ -104,17 +106,21 @@ public:
       [=] AMREX_GPU_DEVICE( int i, int j, int k, int n ) noexcept {
         // Only operate on external ghost cells
         if ( !valid_box.contains( i, j, k ) ) {
-          arr( i, j, k, n + dcomp ) = ExpectedPressure( geom, i, j, k );
+          arr( i, j, k, n + dcomp ) = ExpectedPressure( geom, i, j, k, vFineN );
         }
       } );
   }
+
+private:
+  int vFineN = 0;
 };
 
 static void GaussSeidelIteration(  //
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
-  int iteration );
+  int iteration,
+  int fineN );
 
 static amrex::Real ComputeResidual(  //
   const amrex::MultiFab& pressure,
@@ -131,7 +137,8 @@ static void SolvePressureIterations(  //
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
   amrex::Real tolerance,
-  int max_iterations );
+  int max_iterations,
+  int fineN );
 
 /*--------------------------------------------------------------------
   public free function definitions
@@ -205,14 +212,14 @@ void DefineFABs(  //
 
 void InitializeVelocity(  //
   std::array<amrex::MultiFab, 3>& velocity,
-  const amrex::Geometry& geom )
+  const amrex::Geometry& geom,
+  int fineN )
 {
   // Set all velocities to zero
   for ( int d = 0; d < 3; ++d ) {
     velocity[d].setVal( 0.0 );
   }
 
-  constexpr int fineN = 8;
   const int halfN = fineN / 2;
   if ( geom.Domain().length( 0 ) == fineN ) {
     const int i_face = halfN;
@@ -239,7 +246,8 @@ void InitializeVelocity(  //
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const std::string& filename,
-  const LevelData& fullFineSolution )
+  const LevelData& fullFineSolution,
+  int fineN )
 {
   const int finest_lev = static_cast<int>( level_data.size() ) - 1;
   const amrex::Geometry& fine_geom = level_data[finest_lev].geom;
@@ -353,7 +361,7 @@ void SamplePressureAlongLine(  //
       }
 
       // Add analytic solution as last column
-      amrex::Real expected = ExpectedPressure( fine_geom, i, j, k );
+      amrex::Real expected = ExpectedPressure( fine_geom, i, j, k, fineN );
       outfile << "," << expected;
       outfile << "\n";
     }
@@ -397,7 +405,8 @@ void SolvePressure(  //
   const std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,
   amrex::Real tolerance,
-  int max_iterations )
+  int max_iterations,
+  int fineN )
 {
   // Allocate and compute divergence
   amrex::MultiFab divergence( pressure.boxArray(),
@@ -415,12 +424,14 @@ void SolvePressure(  //
     divergence,
     geom,
     tolerance,
-    max_iterations );
+    max_iterations,
+    fineN );
 }
 
 void CheckResults(  //
   const amrex::MultiFab& pressure,
-  const amrex::Geometry& geom )
+  const amrex::Geometry& geom,
+  int fineN )
 {
   amrex::Real max_error = 0.0;
   amrex::Real avg_error = 0.0;
@@ -436,8 +447,12 @@ void CheckResults(  //
     for ( int i = lo.x; i <= hi.x; ++i ) {
       for ( int j = lo.y; j <= hi.y; ++j ) {
         for ( int k = lo.z; k <= hi.z; ++k ) {
-          const amrex::Real expected =  //
-            ExpectedPressure( geom, i, j, k );
+          const amrex::Real expected = ExpectedPressure(  //
+            geom,
+            i,
+            j,
+            k,
+            fineN );
           const amrex::Real error = std::abs( p_arr( i, j, k ) - expected );
 
           max_error = std::max( max_error, error );
@@ -616,7 +631,8 @@ static void GaussSeidelIteration(  //
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
-  int iteration )
+  int iteration,
+  int fineN )
 {
   const amrex::Real dx = geom.CellSize( 0 );
   const amrex::Real dx2 = dx * dx;
@@ -633,7 +649,7 @@ static void GaussSeidelIteration(  //
   }
 
   // Create boundary condition functor
-  PressureBndryFunc pbf{};
+  PressureBndryFunc pbf( fineN );
   amrex::PhysBCFunct<PressureBndryFunc> physbc( geom, bc, pbf );
 
   // Fill ghost cells with boundary conditions
@@ -730,7 +746,8 @@ static void SolvePressureIterations(  //
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
   amrex::Real tolerance,
-  int max_iterations )
+  int max_iterations,
+  int fineN )
 {
   amrex::Real residual = 1.0;
   int iteration = 0;
@@ -740,7 +757,8 @@ static void SolvePressureIterations(  //
       pressure,
       divergence,
       geom,
-      iteration );
+      iteration,
+      fineN );
     residual = ComputeResidual( pressure, divergence, geom );
     iteration++;
 
@@ -759,51 +777,41 @@ LevelData::LevelData( int n, amrex::Real domain_length )
 {
 }
 
-LevelData MakeDenseLevelData( int n, amrex::Real domain_length )
+LevelData MakeDenseLevelData( int n, amrex::Real domain_length, int fineN )
 {
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom );
+  InitializeVelocity( level_data.velocity, level_data.geom, fineN );
   return level_data;
 }
 
-LevelData MakeSparseLevelData( int n, amrex::Real domain_length )
+LevelData MakeSparseLevelData( int n, amrex::Real domain_length, int fineN )
 {
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineSparseBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom );
+  InitializeVelocity( level_data.velocity, level_data.geom, fineN );
   return level_data;
-}
-
-std::vector<LevelData> MakeDenseCompositeLevels(  //
-  int base_n,
-  int nlevels,
-  amrex::Real domain_length )
-{
-  std::vector<LevelData> composite_levels;
-  for ( int lev = 0; lev < nlevels; ++lev ) {
-    int n = base_n * ( 1 << lev );
-    composite_levels.push_back( MakeDenseLevelData( n, domain_length ) );
-  }
-  return composite_levels;
 }
 
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
-  amrex::Real domain_length )
+  amrex::Real domain_length,
+  int fineN )
 {
   std::vector<LevelData> composite_levels;
   for ( int lev = 0; lev < nlevels; ++lev ) {
     int n = base_n * ( 1 << lev );
     if ( lev == 0 ) {
-      composite_levels.push_back( MakeDenseLevelData( n, domain_length ) );
+      composite_levels.push_back(
+        MakeDenseLevelData( n, domain_length, fineN ) );
     } else {
-      composite_levels.push_back( MakeSparseLevelData( n, domain_length ) );
+      composite_levels.push_back(
+        MakeSparseLevelData( n, domain_length, fineN ) );
     }
   }
   return composite_levels;
@@ -811,7 +819,8 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
 
 void FillPressureGhostCells(  //
   LevelData& fine_level,
-  const LevelData& crse_level )
+  const LevelData& crse_level,
+  int fineN )
 {
   // Set up boundary conditions for pressure
   amrex::Vector<amrex::BCRec> bcs( 1 );  // One component for pressure
@@ -821,8 +830,8 @@ void FillPressureGhostCells(  //
   }
 
   // Create boundary condition functors
-  PressureBndryFunc cbc;
-  PressureBndryFunc fbc;
+  PressureBndryFunc cbc( fineN );
+  PressureBndryFunc fbc( fineN );
   amrex::PhysBCFunct<PressureBndryFunc> cphysbc( crse_level.geom, bcs, cbc );
   amrex::PhysBCFunct<PressureBndryFunc> fphysbc( fine_level.geom, bcs, fbc );
 
@@ -878,7 +887,8 @@ void SolvePressureCorrection(  //
   const amrex::Geometry& crse_geom,
   const amrex::Geometry& fine_geom,
   amrex::Real tolerance,
-  int max_iterations )
+  int max_iterations,
+  int fineN )
 {
   // Calculate refinement ratio
   amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
@@ -981,7 +991,8 @@ void SolvePressureCorrection(  //
   correction_solution.setVal( 0.0 );
   correction_div.setVal( 0.0 );
 
-  // Fix issue with scaling. TODO: Should we be calculating fluxes differently?
+  // Fix issue with scaling. TODO: Should we be calculating fluxes
+  // differently?
   amrex::MultiFab volumes(  //
     correction_div.boxArray(),
     correction_div.DistributionMap(),
@@ -1001,7 +1012,8 @@ void SolvePressureCorrection(  //
     correction_div,
     crse_geom,
     tolerance,
-    max_iterations );
+    max_iterations,
+    fineN );
 
   // Add correction to coarse pressure
   amrex::MultiFab::Add( crse_pressure, correction_solution, 0, 0, 1, 0 );
