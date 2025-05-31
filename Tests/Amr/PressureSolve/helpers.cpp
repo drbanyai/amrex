@@ -316,78 +316,81 @@ void SamplePressureAlongLine(  //
         level_data[finest_lev].geom );
     }
   }
+  // Only rank 0 process should write output files
+  if ( amrex::ParallelDescriptor::IOProcessor() ) {
 
-  // Prepare output
-  std::ofstream outfile( filename );
-  outfile << "x";
-  for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    outfile << ",pressure_L" << lev;
-  }
-  outfile << ",expected\n";
-
-  // Sample along x-axis at center_y, center_z
-  const amrex::Box& domain = fine_geom.Domain();
-  for ( int i = domain.smallEnd( 0 ); i <= domain.bigEnd( 0 ); ++i ) {
-    amrex::Real x = fine_geom.CellCenter( i, 0 );
-    outfile << x;
-
-    // For each level, sample pressure at (i, center_j, center_k) on the finest
-    // grid
-    int j = static_cast<int>( ( center_y - fine_geom.ProbLo( 1 ) ) /
-                              fine_geom.CellSize( 1 ) );
-    int k = static_cast<int>( ( center_z - fine_geom.ProbLo( 2 ) ) /
-                              fine_geom.CellSize( 2 ) );
+    // Prepare output
+    std::ofstream outfile( filename );
+    outfile << "x";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
-      amrex::Real val = 0.0;
-      for ( amrex::MFIter mfi( fine_level_pressure[lev] ); mfi.isValid();
-            ++mfi ) {
-        const amrex::Box& box = mfi.validbox();
-        if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
-          const auto& parr = fine_level_pressure[lev].array( mfi );
-          val = parr( i, j, k );
-          break;
-        }
-      }
-      outfile << "," << val;
+      outfile << ",pressure_L" << lev;
     }
+    outfile << ",expected\n";
 
-    // Add analytic solution as last column
-    amrex::Real expected = ExpectedPressure( fine_geom, i, j, k );
-    outfile << "," << expected;
-    outfile << "\n";
+    // Sample along x-axis at center_y, center_z
+    const amrex::Box& domain = fine_geom.Domain();
+    for ( int i = domain.smallEnd( 0 ); i <= domain.bigEnd( 0 ); ++i ) {
+      amrex::Real x = fine_geom.CellCenter( i, 0 );
+      outfile << x;
+
+      // For each level, sample pressure at (i, center_j, center_k) on the
+      // finest grid
+      int j = static_cast<int>( ( center_y - fine_geom.ProbLo( 1 ) ) /
+                                fine_geom.CellSize( 1 ) );
+      int k = static_cast<int>( ( center_z - fine_geom.ProbLo( 2 ) ) /
+                                fine_geom.CellSize( 2 ) );
+      for ( int lev = 0; lev <= finest_lev; ++lev ) {
+        amrex::Real val = 0.0;
+        for ( amrex::MFIter mfi( fine_level_pressure[lev] ); mfi.isValid();
+              ++mfi ) {
+          const amrex::Box& box = mfi.validbox();
+          if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
+            const auto& parr = fine_level_pressure[lev].array( mfi );
+            val = parr( i, j, k );
+            break;
+          }
+        }
+        outfile << "," << val;
+      }
+
+      // Add analytic solution as last column
+      amrex::Real expected = ExpectedPressure( fine_geom, i, j, k );
+      outfile << "," << expected;
+      outfile << "\n";
+    }
+    outfile.close();
+
+    // Create gnuplot script
+    std::ofstream script( "plot_pressure.gp" );
+    script << "set terminal png size 800,600\n";
+    script << "set output 'pressure_profile.png'\n";
+    script << "set xlabel 'x (m)'\n";
+    script << "set ylabel 'Pressure (Pa)'\n";
+    script << "set xzeroaxis\n";
+    script << "set datafile separator ','\n";
+    script << "plot ";
+    for ( int lev = 0; lev <= finest_lev; ++lev ) {
+      if ( lev > 0 ) script << ", ";
+      script << "'" << filename << "' using 1:" << ( lev + 2 )
+             << " title 'Level " << lev << "' with linespoints";
+    }
+    script << ", '" << filename << "' using 1:" << ( finest_lev + 3 )
+           << " title 'Analytic' with linespoints\n";
+    script << "\n";
+    script << "set output 'pressure_error.png'\n";
+    script << "set xlabel 'x (m)'\n";
+    script << "set ylabel 'Pressure Error (Pa)'\n";
+    script << "set xzeroaxis\n";
+    script << "set datafile separator ','\n";
+    // Error: finest level minus analytic
+    script << "plot '" << filename << "' using 1:($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 3 )
+           << ") title 'Finest - Analytic' with linespoints\n";
+    script.close();
+
+    // Run gnuplot
+    std::system( "gnuplot plot_pressure.gp" );
   }
-  outfile.close();
-
-  // Create gnuplot script
-  std::ofstream script( "plot_pressure.gp" );
-  script << "set terminal png size 800,600\n";
-  script << "set output 'pressure_profile.png'\n";
-  script << "set xlabel 'x (m)'\n";
-  script << "set ylabel 'Pressure (Pa)'\n";
-  script << "set xzeroaxis\n";
-  script << "set datafile separator ','\n";
-  script << "plot ";
-  for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    if ( lev > 0 ) script << ", ";
-    script << "'" << filename << "' using 1:" << ( lev + 2 ) << " title 'Level "
-           << lev << "' with linespoints";
-  }
-  script << ", '" << filename << "' using 1:" << ( finest_lev + 3 )
-         << " title 'Analytic' with linespoints\n";
-  script << "\n";
-  script << "set output 'pressure_error.png'\n";
-  script << "set xlabel 'x (m)'\n";
-  script << "set ylabel 'Pressure Error (Pa)'\n";
-  script << "set xzeroaxis\n";
-  script << "set datafile separator ','\n";
-  // Error: finest level minus analytic
-  script << "plot '" << filename << "' using 1:($" << ( finest_lev + 2 ) << "-$"
-         << ( finest_lev + 3 )
-         << ") title 'Finest - Analytic' with linespoints\n";
-  script.close();
-
-  // Run gnuplot
-  std::system( "gnuplot plot_pressure.gp" );
 }
 
 void SolvePressure(  //
