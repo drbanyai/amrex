@@ -29,8 +29,8 @@ struct LevelData
 
 // Geometry and mesh setup
 amrex::Geometry DefineGeometry( int nx, int ny, int nz, double dx );
-amrex::BoxArray DefineBoxArray( int nx, int ny, int nz );
-amrex::BoxArray DefineSparseBoxArray( int nx, int ny, int nz );
+amrex::BoxArray DefineBoxArray( int n );
+amrex::BoxArray DefineSparseBoxArray( int n );
 amrex::DistributionMapping DefineDM( const amrex::BoxArray& ba );
 
 // Data structure setup
@@ -51,8 +51,7 @@ void SolvePressure(  //
   const std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,
   amrex::Real tolerance,
-  int max_iterations,
-  amrex::Real omega );
+  int max_iterations );
 
 // Verification
 // Multi-level sampling and CSV output
@@ -70,7 +69,6 @@ void SamplePressureAlongLine(  //
 
 void CheckResults(  //
   const amrex::MultiFab& pressure,
-  const std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom );
 
 // Comparison utilities
@@ -107,8 +105,7 @@ void SolvePressureCorrection(  //
   const amrex::Geometry& crse_geom,
   const amrex::Geometry& fine_geom,
   amrex::Real tolerance,
-  int max_iterations,
-  amrex::Real omega );
+  int max_iterations );
 
 /*--------------------------------------------------------------------
   End of file

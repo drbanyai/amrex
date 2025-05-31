@@ -36,7 +36,6 @@ int MyMain()
   constexpr int base_n = 4;
   constexpr amrex::Real domain_length = 1.0;  // meters
   constexpr amrex::Real tolerance = 1.0e-6;
-  constexpr amrex::Real omega = 1.0;
   constexpr int max_iterations = 500;
 
   // First create and work with fine-level data
@@ -53,17 +52,16 @@ int MyMain()
   amrex::Print()  //
     << "\nComplete fine solution, domain: " << fine_level.geom.Domain()
     << ", dx = " << fine_level.geom.CellSize()[0] << "\n";
-  amrex::Print()  //
-    << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations
-    << ", Relaxation: " << omega << "\n";
+  amrex::Print()                     //
+    << "  Tolerance: " << tolerance  //
+    << ", Max iterations: " << max_iterations << "\n";
   SolvePressure(  //
     fine_level.pressure,
     fine_level.velocity,
     fine_level.geom,
     tolerance,
-    max_iterations,
-    omega );
-  CheckResults( fine_level.pressure, fine_level.velocity, fine_level.geom );
+    max_iterations );
+  CheckResults( fine_level.pressure, fine_level.geom );
 
   // Loop over levels: solve and check results
   // TODO: Need to implement recursive composite solve
@@ -74,7 +72,7 @@ int MyMain()
       << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
     amrex::Print()  //
       << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations
-      << ", Relaxation: " << omega << "\n";
+      << "\n";
 
     // Fill ghost cells for pressure from coarser level
     if ( lev > 0 ) {
@@ -88,8 +86,7 @@ int MyMain()
       composite_levels[lev].velocity,
       composite_levels[lev].geom,
       tolerance,
-      max_iterations,
-      omega );
+      max_iterations );
 
     if ( lev > 0 ) {
       // Calculate and apply the correction to the coarser level
@@ -99,8 +96,7 @@ int MyMain()
         composite_levels[lev - 1].geom,
         composite_levels[lev].geom,
         tolerance,
-        max_iterations,
-        omega );
+        max_iterations );
       // Fill fine ghosts from coarse level
       FillPressureGhostCells( composite_levels[lev],
                               composite_levels[lev - 1] );
@@ -110,8 +106,7 @@ int MyMain()
         composite_levels[lev].velocity,
         composite_levels[lev].geom,
         tolerance,
-        max_iterations,
-        omega );
+        max_iterations );
     }
   }
 
@@ -123,7 +118,6 @@ int MyMain()
       << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
     CheckResults(  //
       composite_levels[lev].pressure,
-      composite_levels[lev].velocity,
       composite_levels[lev].geom );
   }
 
