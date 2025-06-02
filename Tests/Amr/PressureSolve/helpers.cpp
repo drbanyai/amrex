@@ -277,42 +277,32 @@ void SamplePressureAlongLine(  //
     bcs.at( 0 ).setHi( idim, amrex::BCType::ext_dir );
   }
 
-  // Create boundary condition functors for each level
-  amrex::Vector<amrex::PhysBCFunct<PressureBndryFunc>> physbcs;
-  for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    physbcs.emplace_back(  //
-      level_data[lev].geom,
-      bcs,
-      PressureBndryFunc( fineN ) );
-  }
-
-  // Prepare data for FillPatchNLevels
-  amrex::Vector<amrex::Vector<amrex::MultiFab*>> smf( level_data.size() );
-  amrex::Vector<amrex::Vector<amrex::Real>> st( level_data.size() );
-  amrex::Vector<amrex::Geometry> geom( level_data.size() );
-  amrex::Vector<amrex::IntVect> ratio( level_data.size() );
-
-  for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    smf.at( lev ) =  //
-      { const_cast<amrex::MultiFab*>( &level_data[lev].pressure ) };
-    st.at( lev ) = { 0.0 };
-    geom.at( lev ) = level_data[lev].geom;
-#if 1
-    if ( lev < finest_lev ) {
-      ratio.at( lev ) = level_data[lev + 1].geom.Domain().size() /
-                        level_data[lev].geom.Domain().size();
-    } else {
-      // TODO: How do ratios work?
-      ratio.at( lev ) = amrex::IntVect::TheUnitVector();
-    }
-#else
-    // TODO: How do ratios work?
-    ratio.at( lev ) = amrex::IntVect( 2, 2, 2 );
-#endif
-  }
-
   // Fill all levels with proper interpolation
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    // Create boundary condition functors for each level
+    amrex::Vector<amrex::PhysBCFunct<PressureBndryFunc>> physbcs;
+    for ( int thisLevel = 0; thisLevel <= lev; ++thisLevel ) {
+      physbcs.emplace_back(  //
+        level_data[thisLevel].geom,
+        bcs,
+        PressureBndryFunc( fineN ) );
+    }
+
+    // Prepare data for FillPatchNLevels
+    amrex::Vector<amrex::Vector<amrex::MultiFab*>> smf;
+    amrex::Vector<amrex::Vector<amrex::Real>> st;
+    amrex::Vector<amrex::Geometry> geom;
+    amrex::Vector<amrex::IntVect> ratio;
+
+    for ( int thisLevel = 0; thisLevel <= lev; ++thisLevel ) {
+      smf.emplace_back(  //
+        amrex::Vector<amrex::MultiFab*>{
+          const_cast<amrex::MultiFab*>( &level_data[thisLevel].pressure ) } );
+      st.emplace_back( amrex::Vector<amrex::Real>{ 0.0 } );
+      geom.emplace_back( level_data[thisLevel].geom );
+      ratio.emplace_back( amrex::IntVect( 2, 2, 2 ) );
+    }
+
     auto& outMF = interpolated_pressure.at( lev );
     constexpr amrex::Real time = 0.0;
     constexpr int scomp = 0;
@@ -429,7 +419,7 @@ void SamplePressureAlongLine(  //
     script << "set ylabel 'Pressure (Pa)'\n";
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
-    script << "set yrange [-1:1]\n";  // DEBUG
+    script << "set yrange [-1.5:1.5]\n";  // DEBUG
     script << "plot '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
@@ -444,14 +434,20 @@ void SamplePressureAlongLine(  //
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (unitless)'\n";
     script << "set yrange [*:*]\n";
-    // Error: finest level minus analytic
-    script << "plot '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
-           << ") title '(Finest - Analytic)/Analytic' with linespoints";
-    // Add error for full fine solution
-    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 3 ) << "-$"
+    script << "plot";
+    // Error: full fine solution minus analytic
+    script << " '" << filename << "' using 1:(($" << ( finest_lev + 3 ) << "-$"
            << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
-           << ") title '(Full Fine - Analytic)/Analytic' with linespoints\n";
+           << ") title '(Full Fine - Analytic)/Analytic' with linespoints";
+    // Error: finest level minus analytic
+    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 2 ) << "-$"
+           << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
+           << ") title '(Finest - Analytic)/Analytic' with linespoints";
+    // Error: finest level minus full fine
+    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 2 ) << "-$"
+           << ( finest_lev + 3 ) << ")/$" << ( finest_lev + 3 )
+           << ") title '(Finest - Full Fine)/Full Fine' with linespoints";
+    script << "\n";
     script.close();
 
     // Run gnuplot
@@ -1051,7 +1047,7 @@ void SolvePressureCorrection(  //
   correction_div.setVal( 0.0 );
 
 #if 0
-  // Initialize ghosts?????
+  // Initialize ghosts?????  Makes no difference.
   correction_solution.ParallelCopy(  //
     crse_pressure,                   // source
     0,                               // source component
