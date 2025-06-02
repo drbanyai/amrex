@@ -21,6 +21,68 @@ int MyMain();
 /*--------------------------------------------------------------------
   function definitions
   --------------------------------------------------------------------*/
+void CompositeSolve(  //
+  std::vector<LevelData>& composite_levels,
+  amrex::Real tolerance,
+  int max_iterations,
+  int fineN,
+  int level = 0 )
+{
+  const int nLevels = composite_levels.size();
+  amrex::Print()  //
+    << "\nLevel: " << level
+    << ", domain: " << composite_levels[level].geom.Domain()
+    << ", dx = " << composite_levels[level].geom.CellSize()[0] << "\n";
+  amrex::Print()  //
+    << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations
+    << "\n";
+
+  if ( level > 0 ) {
+    // Fill ghost cells in N using N-1 results
+    FillPressureGhostCells(  //
+      composite_levels[level],
+      composite_levels[level - 1],
+      fineN );
+  }
+
+  // Single-level solve on N
+  SolvePressure(  //
+    composite_levels[level].pressure,
+    composite_levels[level].velocity,
+    composite_levels[level].geom,
+    tolerance,
+    max_iterations,
+    fineN );
+
+  if ( level < nLevels - 1 ) {
+    // Composite solve on N+1 and above
+    CompositeSolve(  //
+      composite_levels,
+      tolerance,
+      max_iterations,
+      fineN,
+      level + 1 );
+
+    // Correction solve on N using N+1/N flux mismatch
+    SolvePressureCorrection(  //
+      composite_levels[level].pressure,
+      composite_levels[level + 1].pressure,
+      composite_levels[level].geom,
+      composite_levels[level + 1].geom,
+      tolerance,
+      max_iterations,
+      fineN );
+
+    // Composite solve on N+1 and above, using corrected N
+    CompositeSolve(  //
+      composite_levels,
+      tolerance,
+      max_iterations,
+      fineN,
+      level + 1 );
+  }
+}
+
 int main( int argc, char** argv )
 {
   amrex::Initialize( argc, argv );
@@ -32,7 +94,7 @@ int main( int argc, char** argv )
 int MyMain()
 {
   // Number of levels (AMR-ready, even if only single-level for now)
-  constexpr int nlevels = 2;
+  constexpr int nlevels = 3;
   constexpr int baseN = 4;
   constexpr int fineN = baseN * ( 1 << ( nlevels - 1 ) );
   constexpr amrex::Real domain_length = 1.0;  // meters
@@ -65,57 +127,8 @@ int MyMain()
     fineN );
   CheckResults( fine_level.pressure, fine_level.geom, fineN );
 
-  // Loop over levels: solve and check results
-  // TODO: Need to implement recursive composite solve
-  for ( int lev = 0; lev < nlevels; ++lev ) {
-    amrex::Print()  //
-      << "\nLevel: " << lev
-      << ", domain: " << composite_levels[lev].geom.Domain()
-      << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
-    amrex::Print()  //
-      << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations
-      << "\n";
-
-    // Fill ghost cells for pressure from coarser level
-    if ( lev > 0 ) {
-      FillPressureGhostCells( composite_levels[lev],
-                              composite_levels[lev - 1],
-                              fineN );
-    }
-
-    // Single fine-level solve
-    SolvePressure(  //
-      composite_levels[lev].pressure,
-      composite_levels[lev].velocity,
-      composite_levels[lev].geom,
-      tolerance,
-      max_iterations,
-      fineN );
-
-    if ( lev > 0 ) {
-      // Calculate and apply the correction to the coarser level
-      SolvePressureCorrection(  //
-        composite_levels[lev - 1].pressure,
-        composite_levels[lev].pressure,
-        composite_levels[lev - 1].geom,
-        composite_levels[lev].geom,
-        tolerance,
-        max_iterations,
-        fineN );
-      // Fill fine ghosts from coarse level
-      FillPressureGhostCells( composite_levels[lev],
-                              composite_levels[lev - 1],
-                              fineN );
-      // Re-solve fine level
-      SolvePressure(  //
-        composite_levels[lev].pressure,
-        composite_levels[lev].velocity,
-        composite_levels[lev].geom,
-        tolerance,
-        max_iterations,
-        fineN );
-    }
-  }
+  // Solve on the full composite mesh
+  CompositeSolve( composite_levels, tolerance, max_iterations, fineN );
 
   amrex::Print() << "\nChecking results for all levels\n";
   for ( int lev = 0; lev < nlevels; ++lev ) {
