@@ -98,7 +98,7 @@ int MyMain()
   constexpr int baseN = 4;
   constexpr int fineN = baseN * ( 1 << ( nlevels - 1 ) );
   constexpr amrex::Real domain_length = 1.0;  // meters
-  constexpr amrex::Real tolerance = 1.0e-6;
+  constexpr amrex::Real tolerance = 1.0e-8;
   constexpr int max_iterations = 500;
 
   // First create and work with fine-level data

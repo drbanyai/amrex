@@ -979,13 +979,12 @@ void SolvePressureCorrection(  //
   }
 
   // Compute fluxes on both levels
-  const amrex::Real dx_crse = crse_geom.CellSize( 0 );
-  const amrex::Real dx_fine = fine_geom.CellSize( 0 );
-  const amrex::Real dxinv_crse = 1.0 / dx_crse;
-  const amrex::Real dxinv_fine = 1.0 / dx_fine;
+  // Flux = -Dp/dx
+  // Face_Flux = -dp/dx * area = -dp/dx * (dx*dx) = -dp * dx
 
   // Compute coarse fluxes
   for ( amrex::MFIter mfi( crse_pressure ); mfi.isValid(); ++mfi ) {
+    const amrex::Real scale = crse_geom.CellSize( 0 );
     const auto& pres_arr = crse_pressure.const_array( mfi );
     for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
       const amrex::Box& bx = crse_flux[dir][mfi].box();
@@ -994,14 +993,14 @@ void SolvePressureCorrection(  //
       amrex::ParallelFor( bx, [=] AMREX_GPU_DEVICE( int i, int j, int k ) {
         // Compute flux using central differences
         if ( dir == 0 ) {
-          flux_arr( i, j, k ) = dxinv_crse * ( pres_arr( i, j, k ) -
-                                               pres_arr( i - 1, j, k ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i - 1, j, k ) );
         } else if ( dir == 1 ) {
-          flux_arr( i, j, k ) = dxinv_crse * ( pres_arr( i, j, k ) -
-                                               pres_arr( i, j - 1, k ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i, j - 1, k ) );
         } else {
-          flux_arr( i, j, k ) = dxinv_crse * ( pres_arr( i, j, k ) -
-                                               pres_arr( i, j, k - 1 ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i, j, k - 1 ) );
         }
       } );
     }
@@ -1009,6 +1008,7 @@ void SolvePressureCorrection(  //
 
   // Compute fine fluxes
   for ( amrex::MFIter mfi( fine_pressure ); mfi.isValid(); ++mfi ) {
+    const amrex::Real scale = fine_geom.CellSize( 0 );
     const auto& pres_arr = fine_pressure.const_array( mfi );
     for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
       const amrex::Box& bx = fine_flux[dir][mfi].box();
@@ -1017,14 +1017,14 @@ void SolvePressureCorrection(  //
       amrex::ParallelFor( bx, [=] AMREX_GPU_DEVICE( int i, int j, int k ) {
         // Compute flux using central differences
         if ( dir == 0 ) {
-          flux_arr( i, j, k ) = dxinv_fine * ( pres_arr( i, j, k ) -
-                                               pres_arr( i - 1, j, k ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i - 1, j, k ) );
         } else if ( dir == 1 ) {
-          flux_arr( i, j, k ) = dxinv_fine * ( pres_arr( i, j, k ) -
-                                               pres_arr( i, j - 1, k ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i, j - 1, k ) );
         } else {
-          flux_arr( i, j, k ) = dxinv_fine * ( pres_arr( i, j, k ) -
-                                               pres_arr( i, j, k - 1 ) );
+          flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
+                                          pres_arr( i, j, k - 1 ) );
         }
       } );
     }
@@ -1062,20 +1062,7 @@ void SolvePressureCorrection(  //
     amrex::Periodicity::NonPeriodic() );
 #endif
 
-  // Fix issue with scaling. TODO: Should we be calculating fluxes
-  // differently?
-  amrex::MultiFab volumes(  //
-    correction_div.boxArray(),
-    correction_div.DistributionMap(),
-    1,
-    0 );
-  volumes = 1.0;
-
-  // Apply flux corrections - this computes the divergence of the flux
-  // mismatches
-  for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
-    flux_reg.Reflux( correction_div, volumes, dir, 1.0, 0, 0, 1, crse_geom );
-  }
+  flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
 
   // Solve for the correction using the divergence as the right-hand side
   SolvePressureIterations(  //
