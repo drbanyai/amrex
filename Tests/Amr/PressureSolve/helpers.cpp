@@ -375,7 +375,7 @@ void SamplePressureAlongLine(  //
     script << "set ylabel 'Pressure (Pa)'\n";
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
-    // script << "set yrange [-1:1]\n";
+    script << "set yrange [-1:1]\n";  // DEBUG
     script << "plot '" << filename << "' using 1:" << ( finest_lev + 3 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
@@ -386,13 +386,12 @@ void SamplePressureAlongLine(  //
     script << "\n";
     script << "set output 'pressure_error.png'\n";
     script << "set xlabel 'x (m)'\n";
-    script << "set ylabel 'Pressure Error (Pa)'\n";
-    script << "set xzeroaxis\n";
-    script << "set datafile separator ','\n";
+    script << "set ylabel 'Pressure Error (unitless)'\n";
+    script << "set yrange [*:*]\n";
     // Error: finest level minus analytic
-    script << "plot '" << filename << "' using 1:($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 3 )
-           << ") title 'Finest - Analytic' with linespoints\n";
+    script << "plot '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 3 ) << ")/$" << ( finest_lev + 3 )
+           << ") title '(Finest - Analytic)/Analytic' with linespoints\n";
     script.close();
 
     // Run gnuplot
