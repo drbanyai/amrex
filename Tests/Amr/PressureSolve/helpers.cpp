@@ -258,71 +258,92 @@ void SamplePressureAlongLine(  //
   const amrex::Real center_z = 0.5 * ( fine_geom.ProbLo( 2 ) +
                                        fine_geom.ProbHi( 2 ) );
 
-  // Prepare: for each level, create a MultiFab on the finest grid
-  amrex::Vector<amrex::MultiFab> fine_level_pressure( level_data.size() );
-
-  // Simple wrapper for AMReX InterpFromCoarseLevel for cell-centered,
-  // single-component interpolation
-  auto InterpFromCoarseToFineSimple = []( amrex::MultiFab& fine,
-                                          const amrex::MultiFab& coarse,
-                                          const amrex::Geometry& coarse_geom,
-                                          const amrex::Geometry& fine_geom ) {
-    BL_PROFILE( "InterpFromCoarseToFineSimple" );
-    AMREX_ALWAYS_ASSERT( fine.nComp() == 1 && coarse.nComp() == 1 );
-
-    // Calculate refinement ratio
-    amrex::IntVect ratio = fine_geom.Domain().size() /
-                           coarse_geom.Domain().size();
-    AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] &&
-                         ratio[1] == ratio[2] );  // Ensure uniform refinement
-
-    // Use cell-centered conservative interpolation
-    amrex::CellConservativeLinear interp;
-
-    // Set up boundary conditions (one component)
-    amrex::Vector<amrex::BCRec> bcr( 1 );
-
-    // Interpolate from coarse to fine level
-    amrex::InterpFromCoarseLevel(  //
-      fine,                        // destination MultiFab
-      amrex::IntVect{},
-      amrex::IntVect{},
-      coarse,       // source MultiFab
-      0,            // source component
-      0,            // destination component
-      1,            // number of components
-      coarse_geom,  // coarse geometry
-      fine_geom,    // fine geometry
-      ratio,        // refinement ratio
-      &interp,
-      bcr,
-      0 );  // interpolation operator
-  };
-
+  // Create MultiFabs to store interpolated pressure at each level
+  amrex::Vector<amrex::MultiFab> interpolated_pressure( level_data.size() );
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
     // Define MultiFab with same structure as full fine pressure.
-    fine_level_pressure[lev].define(  //
+    interpolated_pressure[lev].define(  //
       fullFineSolution.pressure.boxArray(),
       fullFineSolution.pressure.DistributionMap(),
       fullFineSolution.pressure.nComp(),
       fullFineSolution.pressure.nGrow() );
-
-    if ( lev > 0 ) {
-      fine_level_pressure[lev].ParallelCopy( fine_level_pressure[lev - 1] );
-    }
-    if ( lev == finest_lev ) {
-      // Initialize data outside the fine FAB and then overwrite the data inside
-      // the FAB
-      fine_level_pressure[lev].ParallelCopy( level_data[lev].pressure );
-    } else {
-      // Interpolate from coarse level to finest grid
-      InterpFromCoarseToFineSimple(  //
-        fine_level_pressure[lev],
-        level_data[lev].pressure,
-        level_data[lev].geom,
-        level_data[finest_lev].geom );
-    }
+    interpolated_pressure.at( lev ).setVal( 0.0 );
   }
+
+  // Set up boundary conditions for pressure
+  amrex::Vector<amrex::BCRec> bcs( 1 );  // One component for pressure
+  for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
+    bcs.at( 0 ).setLo( idim, amrex::BCType::ext_dir );
+    bcs.at( 0 ).setHi( idim, amrex::BCType::ext_dir );
+  }
+
+  // Create boundary condition functors for each level
+  amrex::Vector<amrex::PhysBCFunct<PressureBndryFunc>> physbcs;
+  for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    physbcs.emplace_back(  //
+      level_data[lev].geom,
+      bcs,
+      PressureBndryFunc( fineN ) );
+  }
+
+  // Prepare data for FillPatchNLevels
+  amrex::Vector<amrex::Vector<amrex::MultiFab*>> smf( level_data.size() );
+  amrex::Vector<amrex::Vector<amrex::Real>> st( level_data.size() );
+  amrex::Vector<amrex::Geometry> geom( level_data.size() );
+  amrex::Vector<amrex::IntVect> ratio( level_data.size() );
+
+  for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    smf.at( lev ) =  //
+      { const_cast<amrex::MultiFab*>( &level_data[lev].pressure ) };
+    st.at( lev ) = { 0.0 };
+    geom.at( lev ) = level_data[lev].geom;
+#if 1
+    if ( lev < finest_lev ) {
+      ratio.at( lev ) = level_data[lev + 1].geom.Domain().size() /
+                        level_data[lev].geom.Domain().size();
+    } else {
+      // TODO: How do ratios work?
+      ratio.at( lev ) = amrex::IntVect::TheUnitVector();
+    }
+#else
+    // TODO: How do ratios work?
+    ratio.at( lev ) = amrex::IntVect( 2, 2, 2 );
+#endif
+  }
+
+  // Fill all levels with proper interpolation
+  for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    auto& outMF = interpolated_pressure.at( lev );
+    constexpr amrex::Real time = 0.0;
+    constexpr int scomp = 0;
+    constexpr int dcomp = 0;
+    constexpr int ncomp = 1;
+    constexpr int bccomp = 0;
+    constexpr int bcrcomp = 0;
+    amrex::Vector<amrex::BCRec> bcr( 1 );
+    for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
+      bcr[0].setLo( idim, amrex::BCType::ext_dir );
+      bcr[0].setHi( idim, amrex::BCType::ext_dir );
+    }
+    amrex::FillPatchNLevels(  //
+      outMF,
+      lev,                           // level
+      outMF.nGrowVect(),             // nghost
+      time,                          // time
+      smf,                           // source MultiFabs
+      st,                            // source times
+      scomp,                         // source component
+      dcomp,                         // destination component
+      ncomp,                         // number of components
+      geom,                          // geometries
+      physbcs,                       // boundary conditions
+      bccomp,                        // boundary condition component
+      ratio,                         // refinement ratios
+      &amrex::cell_bilinear_interp,  // interpolation operator
+      bcr,                           // boundary conditions
+      bcrcomp );                     // boundary condition component
+  }
+
   // Only rank 0 process should write output files
   if ( amrex::ParallelDescriptor::IOProcessor() ) {
 
@@ -332,33 +353,66 @@ void SamplePressureAlongLine(  //
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
       outfile << ",pressure_L" << lev;
     }
+    outfile << ",full_fine";  // Add column for full fine solution
     outfile << ",expected\n";
 
     // Sample along x-axis at center_y, center_z
-    const amrex::Box& domain = fine_geom.Domain();
-    for ( int i = domain.smallEnd( 0 ); i <= domain.bigEnd( 0 ); ++i ) {
-      amrex::Real x = fine_geom.CellCenter( i, 0 );
+    const amrex::Box& fine_domain = fine_geom.Domain();
+
+    // For each level, sample pressure at (i, center_j, center_k)
+    const int j = static_cast<int>( ( center_y - fine_geom.ProbLo( 1 ) ) /
+                                    fine_geom.CellSize( 1 ) );
+    const int k = static_cast<int>( ( center_z - fine_geom.ProbLo( 2 ) ) /
+                                    fine_geom.CellSize( 2 ) );
+
+    for ( int i = fine_domain.smallEnd( 0 ); i <= fine_domain.bigEnd( 0 );
+          ++i ) {
+      const amrex::Real x = fine_geom.CellCenter( i, 0 );
       outfile << x;
 
-      // For each level, sample pressure at (i, center_j, center_k) on the
-      // finest grid
-      int j = static_cast<int>( ( center_y - fine_geom.ProbLo( 1 ) ) /
-                                fine_geom.CellSize( 1 ) );
-      int k = static_cast<int>( ( center_z - fine_geom.ProbLo( 2 ) ) /
-                                fine_geom.CellSize( 2 ) );
+      // Sample from interpolated levels
       for ( int lev = 0; lev <= finest_lev; ++lev ) {
         amrex::Real val = 0.0;
-        for ( amrex::MFIter mfi( fine_level_pressure[lev] ); mfi.isValid();
+        bool found = false;
+        for ( amrex::MFIter mfi( interpolated_pressure[lev] ); mfi.isValid();
               ++mfi ) {
           const amrex::Box& box = mfi.validbox();
           if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
-            const auto& parr = fine_level_pressure[lev].array( mfi );
+            const auto& parr = interpolated_pressure[lev].array( mfi );
             val = parr( i, j, k );
+            found = true;
             break;
           }
         }
+        if ( !found ) {
+          amrex::Print() << "No value found for level " << lev
+                         << " at (i, j, k) = (" << i << ", " << j << ", " << k
+                         << ")\n";
+        }
+        assert( found );
         outfile << "," << val;
       }
+
+      // Sample from full fine solution
+      amrex::Real full_fine_val = 0.0;
+      bool found = false;
+      for ( amrex::MFIter mfi( fullFineSolution.pressure ); mfi.isValid();
+            ++mfi ) {
+        const amrex::Box& box = mfi.validbox();
+        if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
+          const auto& parr = fullFineSolution.pressure.array( mfi );
+          full_fine_val = parr( i, j, k );
+          found = true;
+          break;
+        }
+        if ( !found ) {
+          amrex::Print()
+            << "No value found for full fine solution at (i, j, k) = (" << i
+            << ", " << j << ", " << k << ")\n";
+        }
+      }
+      assert( found );
+      outfile << "," << full_fine_val;
 
       // Add analytic solution as last column
       amrex::Real expected = ExpectedPressure( fine_geom, i, j, k, fineN );
@@ -376,13 +430,15 @@ void SamplePressureAlongLine(  //
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
     script << "set yrange [-1:1]\n";  // DEBUG
-    script << "plot '" << filename << "' using 1:" << ( finest_lev + 3 )
+    script << "plot '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
       script << ", '" << filename << "' using 1:" << ( lev + 2 )
              << " title 'Level " << lev << "'"
              << " with linespoints linewidth 2 pointsize 2";
     }
+    script << ", '" << filename << "' using 1:" << ( finest_lev + 3 )
+           << " title 'Full Fine' with linespoints linewidth 2 pointsize 2";
     script << "\n";
     script << "set output 'pressure_error.png'\n";
     script << "set xlabel 'x (m)'\n";
@@ -390,8 +446,12 @@ void SamplePressureAlongLine(  //
     script << "set yrange [*:*]\n";
     // Error: finest level minus analytic
     script << "plot '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 3 ) << ")/$" << ( finest_lev + 3 )
-           << ") title '(Finest - Analytic)/Analytic' with linespoints\n";
+           << "-$" << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
+           << ") title '(Finest - Analytic)/Analytic' with linespoints";
+    // Add error for full fine solution
+    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 3 ) << "-$"
+           << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
+           << ") title '(Full Fine - Analytic)/Analytic' with linespoints\n";
     script.close();
 
     // Run gnuplot
@@ -980,15 +1040,27 @@ void SolvePressureCorrection(  //
   amrex::MultiFab correction_solution(  //
     crse_pressure.boxArray(),
     crse_pressure.DistributionMap(),
-    1,
-    1 );
+    1,    // ncomp
+    1 );  // nghost
+  correction_solution.setVal( 0.0 );
   amrex::MultiFab correction_div(  //
     crse_pressure.boxArray(),
     crse_pressure.DistributionMap(),
-    1,
-    0 );
-  correction_solution.setVal( 0.0 );
+    1,    // ncomp
+    0 );  // nghost
   correction_div.setVal( 0.0 );
+
+#if 0
+  // Initialize ghosts?????
+  correction_solution.ParallelCopy(  //
+    crse_pressure,                   // source
+    0,                               // source component
+    0,                               // dest component
+    1,                               // num comp
+    crse_pressure.nGrow(),           // source nghost
+    correction_solution.nGrow(),     // dest nghost
+    amrex::Periodicity::NonPeriodic() );
+#endif
 
   // Fix issue with scaling. TODO: Should we be calculating fluxes
   // differently?
