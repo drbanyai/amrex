@@ -72,7 +72,7 @@ static amrex::Real ExpectedPressure(  //
 
   // Use cell-averaged inverse distance if the evaluation point coincides with
   // the source, otherwise use pointwise inverse distance
-  const amrex::Real tol = 1e-10;
+  const amrex::Real tol = 1e-5;
   const amrex::Real inv_dist1 = ( dist1 < tol ) ? avg_inv_r : 1.0 / dist1;
   const amrex::Real inv_dist2 = ( dist2 < tol ) ? avg_inv_r : 1.0 / dist2;
   const amrex::Real p = -1.0 / ( 4.0 * M_PI ) * ( inv_dist1 - inv_dist2 );
@@ -116,6 +116,7 @@ private:
 };
 
 static void GaussSeidelIteration(  //
+  bool use_expected_BCs,
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
@@ -133,6 +134,7 @@ static void ComputeDivergence(  //
   const amrex::Geometry& geom );
 
 static void SolvePressureIterations(  //
+  bool use_expected_BCs,
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
@@ -317,21 +319,21 @@ void SamplePressureAlongLine(  //
     }
     amrex::FillPatchNLevels(  //
       outMF,
-      lev,                           // level
-      outMF.nGrowVect(),             // nghost
-      time,                          // time
-      smf,                           // source MultiFabs
-      st,                            // source times
-      scomp,                         // source component
-      dcomp,                         // destination component
-      ncomp,                         // number of components
-      geom,                          // geometries
-      physbcs,                       // boundary conditions
-      bccomp,                        // boundary condition component
-      ratio,                         // refinement ratios
-      &amrex::cell_bilinear_interp,  // interpolation operator
-      bcr,                           // boundary conditions
-      bcrcomp );                     // boundary condition component
+      lev,                       // level
+      outMF.nGrowVect(),         // nghost
+      time,                      // time
+      smf,                       // source MultiFabs
+      st,                        // source times
+      scomp,                     // source component
+      dcomp,                     // destination component
+      ncomp,                     // number of components
+      geom,                      // geometries
+      physbcs,                   // boundary conditions
+      bccomp,                    // boundary condition component
+      ratio,                     // refinement ratios
+      &amrex::quadratic_interp,  // interpolation operator
+      bcr,                       // boundary conditions
+      bcrcomp );                 // boundary condition component
   }
 
   // Only rank 0 process should write output files
@@ -434,6 +436,7 @@ void SamplePressureAlongLine(  //
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (unitless)'\n";
     script << "set yrange [*:*]\n";
+    script << "set yrange [-0.5:0.5]\n";  // DEBUG
     script << "plot";
     // Error: full fine solution minus analytic
     script << " '" << filename << "' using 1:(($" << ( finest_lev + 3 ) << "-$"
@@ -474,7 +477,9 @@ void SolvePressure(  //
   pressure.setVal( 0.0 );
 
   // Solve for pressure using iterations
+  constexpr bool use_expected_BCs = true;
   SolvePressureIterations(  //
+    use_expected_BCs,
     pressure,
     divergence,
     geom,
@@ -683,6 +688,7 @@ static void ComputeDivergence(  //
 }
 
 static void GaussSeidelIteration(  //
+  bool use_expected_BCs,
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
@@ -692,28 +698,30 @@ static void GaussSeidelIteration(  //
   const amrex::Real dx = geom.CellSize( 0 );
   const amrex::Real dx2 = dx * dx;
 
-  // Define boundary conditions
-  amrex::Vector<amrex::BCRec> bc( 1 );
+  if ( use_expected_BCs ) {
+    // Define boundary conditions
+    amrex::Vector<amrex::BCRec> bc( 1 );
 
-  // Set Dirichlet boundary conditions based on analytic solution
-  for ( int n = 0; n < 1; ++n ) {
-    for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
-      bc[n].setLo( dir, amrex::BCType::ext_dir );  // External Dirichlet
-      bc[n].setHi( dir, amrex::BCType::ext_dir );  // External Dirichlet
+    // Set Dirichlet boundary conditions based on analytic solution
+    for ( int n = 0; n < 1; ++n ) {
+      for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
+        bc[n].setLo( dir, amrex::BCType::ext_dir );  // External Dirichlet
+        bc[n].setHi( dir, amrex::BCType::ext_dir );  // External Dirichlet
+      }
     }
+
+    // Create boundary condition functor
+    PressureBndryFunc pbf( fineN );
+    amrex::PhysBCFunct<PressureBndryFunc> physbc( geom, bc, pbf );
+
+    // Fill ghost cells with boundary conditions
+    const int start_comp = 0;          // Starting component
+    const int num_comp = 1;            // Number of components
+    const amrex::IntVect nghost( 1 );  // Ghost cell width
+    const amrex::Real time = 0.0;      // Time
+    const int bccomp = 0;  // Starting component for boundary conditions
+    physbc.FillBoundary( pressure, start_comp, num_comp, nghost, time, bccomp );
   }
-
-  // Create boundary condition functor
-  PressureBndryFunc pbf( fineN );
-  amrex::PhysBCFunct<PressureBndryFunc> physbc( geom, bc, pbf );
-
-  // Fill ghost cells with boundary conditions
-  const int start_comp = 0;          // Starting component
-  const int num_comp = 1;            // Number of components
-  const amrex::IntVect nghost( 1 );  // Ghost cell width
-  const amrex::Real time = 0.0;      // Time
-  const int bccomp = 0;  // Starting component for boundary conditions
-  physbc.FillBoundary( pressure, start_comp, num_comp, nghost, time, bccomp );
 
   // Now do standard Gauss-Seidel iteration for all cells in the domain
   for ( amrex::MFIter mfi( pressure ); mfi.isValid(); ++mfi ) {
@@ -797,6 +805,7 @@ static amrex::Real ComputeResidual(  //
 }
 
 static void SolvePressureIterations(  //
+  bool use_expected_BCs,
   amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
@@ -809,6 +818,7 @@ static void SolvePressureIterations(  //
 
   while ( residual > tolerance && iteration < max_iterations ) {
     GaussSeidelIteration(  //
+      use_expected_BCs,
       pressure,
       divergence,
       geom,
@@ -872,11 +882,74 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
   return composite_levels;
 }
 
+void FillCoarseFineGhosts(  //
+  amrex::MultiFab& fine_mf,
+  const amrex::Geometry& fine_geom,
+  const amrex::MultiFab& crse_mf,
+  const amrex::Geometry& crse_geom )
+{
+  // Unused time (passed to PhysBCFunc and otherwise not used?)
+  constexpr double time_unused = 0.0;
+
+  // Source, destination, and BC components
+  constexpr int scomp = 0;
+  constexpr int dcomp = 0;
+  constexpr int ncomp = 1;
+  constexpr int cbccomp = 0;
+  constexpr int fbccomp = 0;
+  constexpr int bcscomp = 0;
+
+  // Refinement ratio, per dimension
+  const amrex::IntVect ref_ratio( 2 );
+
+  // Domain boundary conditions, per-component
+  constexpr auto re = amrex::BCType::reflect_even;
+  const amrex::BCRec bcrec( re, re, re, re, re, re );
+  const amrex::Vector<amrex::BCRec> bcrecs{ bcrec };
+
+  // Set up BC functors to handle external and coarse/fine ghosts.
+  assert(
+    !amrex::Gpu::inLaunchRegion() );  // Use GpuBndryFuncFab for GPU support?
+  amrex::CpuBndryFuncFab null_bndry_func = nullptr;
+  amrex::PhysBCFunct<amrex::CpuBndryFuncFab> cphysbc( crse_geom,
+                                                      bcrecs,
+                                                      null_bndry_func );
+  amrex::PhysBCFunct<amrex::CpuBndryFuncFab> fphysbc( fine_geom,
+                                                      bcrecs,
+                                                      null_bndry_func );
+
+  // Fill just the coarse/fine ghosts on the fine MultiFab using interpolated
+  // values from the coarse MultiFab.
+  // TODO: Does this also fill interior or exterior fine ghosts?
+  amrex::FillPatchTwoLevels(  //
+    fine_mf,                  // <- Destination
+    time_unused,
+    { const_cast<amrex::MultiFab*>( &crse_mf ) },  // TODO: const?
+    { time_unused },
+    { &fine_mf },  // <- Source, fine at multiple times
+    { time_unused },
+    scomp,
+    dcomp,
+    ncomp,
+    crse_geom,
+    fine_geom,
+    cphysbc,
+    cbccomp,
+    fphysbc,
+    fbccomp,
+    ref_ratio,
+    // &amrex::cell_bilinear_interp,
+    &amrex::quadratic_interp,
+    bcrecs,
+    bcscomp );
+}
+
 void FillPressureGhostCells(  //
   LevelData& fine_level,
   const LevelData& crse_level,
   int fineN )
 {
+#if 0
   // Set up boundary conditions for pressure
   amrex::Vector<amrex::BCRec> bcs( 1 );  // One component for pressure
   for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
@@ -904,7 +977,7 @@ void FillPressureGhostCells(  //
       crse_level.geom,
       nghost,
       ncomp,
-      &amrex::pc_interp );
+      &amrex::quadratic_interp ); // Doesn't make a difference?
   }
 
   // Fill ghost cells using FillPatcher
@@ -934,6 +1007,14 @@ void FillPressureGhostCells(  //
     bcs,                         // Boundary conditions
     0                            // Boundary condition component
   );
+#else
+  // Exactly the same result?
+  FillCoarseFineGhosts(  //
+    fine_level.pressure,
+    fine_level.geom,
+    crse_level.pressure,
+    crse_level.geom );
+#endif
 }
 
 void SolvePressureCorrection(  //
@@ -1047,7 +1128,7 @@ void SolvePressureCorrection(  //
   correction_div.setVal( 0.0 );
 
 #if 0
-  // Initialize ghosts?????  Makes no difference.
+  // Initialize ghosts????? Should not be used.
   correction_solution.ParallelCopy(  //
     crse_pressure,                   // source
     0,                               // source component
@@ -1061,7 +1142,9 @@ void SolvePressureCorrection(  //
   flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
 
   // Solve for the correction using the divergence as the right-hand side
+  constexpr bool use_expected_BCs = false;
   SolvePressureIterations(  //
+    use_expected_BCs,
     correction_solution,
     correction_div,
     crse_geom,
