@@ -47,7 +47,8 @@ void SolvePressure(  //
   const amrex::Geometry& geom,
   amrex::Real tolerance,
   int max_iterations,
-  int fineN );
+  int base_n,
+  int nlevels );
 
 // Verification
 // Multi-level sampling and CSV output
@@ -62,12 +63,14 @@ void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const std::string& filename,
   const LevelData& fullFineSolution,
-  int fineN );
+  int base_n,
+  int nlevels );
 
 void CheckResults(  //
   const amrex::MultiFab& pressure,
   const amrex::Geometry& geom,
-  int fineN );
+  int base_n,
+  int nlevels );
 
 // Comparison utilities
 /**
@@ -103,7 +106,8 @@ void SolvePressureCorrection(  //
   const amrex::Geometry& fine_geom,
   amrex::Real tolerance,
   int max_iterations,
-  int fineN );
+  int base_n,
+  int nlevels );
 
 /*--------------------------------------------------------------------
   End of file

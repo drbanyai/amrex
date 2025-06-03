@@ -251,8 +251,10 @@ void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const std::string& filename,
   const LevelData& fullFineSolution,
-  int fineN )
+  int base_n,
+  int nlevels )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   const int finest_lev = static_cast<int>( level_data.size() ) - 1;
   const amrex::Geometry& fine_geom = level_data[finest_lev].geom;
 
@@ -470,8 +472,10 @@ void SolvePressure(  //
   const amrex::Geometry& geom,
   amrex::Real tolerance,
   int max_iterations,
-  int fineN )
+  int base_n,
+  int nlevels )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   // Allocate and compute divergence
   amrex::MultiFab divergence( pressure.boxArray(),
                               pressure.DistributionMap(),
@@ -497,8 +501,10 @@ void SolvePressure(  //
 void CheckResults(  //
   const amrex::MultiFab& pressure,
   const amrex::Geometry& geom,
-  int fineN )
+  int base_n,
+  int nlevels )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   amrex::Real max_error = 0.0;
   amrex::Real avg_error = 0.0;
   amrex::Real volume = 0.0;
@@ -966,8 +972,10 @@ void SolvePressureCorrection(  //
   const amrex::Geometry& fine_geom,
   amrex::Real tolerance,
   int max_iterations,
-  int fineN )
+  int base_n,
+  int nlevels )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   // Calculate refinement ratio
   amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
   AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] &&

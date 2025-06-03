@@ -29,7 +29,6 @@ void CompositeSolve(  //
   int nlevels,
   int level = 0 )
 {
-  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   const int nLevels = composite_levels.size();
   amrex::Print()  //
     << "\nLevel: " << level
@@ -53,7 +52,8 @@ void CompositeSolve(  //
     composite_levels[level].geom,
     tolerance,
     max_iterations,
-    fineN );
+    base_n,
+    nlevels );
 
   if ( level < nLevels - 1 ) {
     // Composite solve on N+1 and above
@@ -73,7 +73,8 @@ void CompositeSolve(  //
       composite_levels[level + 1].geom,
       tolerance,
       max_iterations,
-      fineN );
+      base_n,
+      nlevels );
 
     // Composite solve on N+1 and above, using corrected N
     CompositeSolve(  //
@@ -99,12 +100,12 @@ int MyMain()
   // Number of levels (AMR-ready, even if only single-level for now)
   constexpr int nlevels = 3;
   constexpr int baseN = 4;
-  constexpr int fineN = baseN * ( 1 << ( nlevels - 1 ) );
   constexpr amrex::Real domain_length = 1.0;  // meters
   constexpr amrex::Real tolerance = 1.0e-8;
   constexpr int max_iterations = 500;
 
   // First create and work with fine-level data
+  constexpr int fineN = baseN * ( 1 << ( nlevels - 1 ) );
   LevelData fine_level = MakeDenseLevelData(  //
     fineN,
     domain_length,
@@ -130,8 +131,9 @@ int MyMain()
     fine_level.geom,
     tolerance,
     max_iterations,
-    fineN );
-  CheckResults( fine_level.pressure, fine_level.geom, fineN );
+    baseN,
+    nlevels );
+  CheckResults( fine_level.pressure, fine_level.geom, baseN, nlevels );
 
   // Solve on the full composite mesh
   CompositeSolve( composite_levels, tolerance, max_iterations, baseN, nlevels );
@@ -145,7 +147,8 @@ int MyMain()
     CheckResults(  //
       composite_levels[lev].pressure,
       composite_levels[lev].geom,
-      fineN );
+      baseN,
+      nlevels );
   }
 
   // Compare fine pressure with all levels
@@ -156,7 +159,8 @@ int MyMain()
     composite_levels,
     "pressure.csv",
     fine_level,
-    fineN );
+    baseN,
+    nlevels );
 
   return 0;
 }
