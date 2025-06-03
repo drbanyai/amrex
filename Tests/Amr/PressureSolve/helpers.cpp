@@ -319,21 +319,25 @@ void SamplePressureAlongLine(  //
     }
     amrex::FillPatchNLevels(  //
       outMF,
-      lev,                       // level
-      outMF.nGrowVect(),         // nghost
-      time,                      // time
-      smf,                       // source MultiFabs
-      st,                        // source times
-      scomp,                     // source component
-      dcomp,                     // destination component
-      ncomp,                     // number of components
-      geom,                      // geometries
-      physbcs,                   // boundary conditions
-      bccomp,                    // boundary condition component
-      ratio,                     // refinement ratios
-      &amrex::quadratic_interp,  // interpolation operator
-      bcr,                       // boundary conditions
-      bcrcomp );                 // boundary condition component
+      lev,                  // level
+      amrex::IntVect( 0 ),  // outMF.nGrowVect(),  // nghost // No difference
+      time,                 // time
+      smf,                  // source MultiFabs
+      st,                   // source times
+      scomp,                // source component
+      dcomp,                // destination component
+      ncomp,                // number of components
+      geom,                 // geometries
+      physbcs,              // boundary conditions
+      bccomp,               // boundary condition component
+      ratio,                // refinement ratios
+      // Interpolator makes a significant difference here
+      // &amrex::pc_interp,
+      // &amrex::cell_bilinear_interp,
+      &amrex::quadratic_interp,
+      // &amrex::cell_quartic_interp,
+      bcr,        // boundary conditions
+      bcrcomp );  // boundary condition component
   }
 
   // Only rank 0 process should write output files
@@ -938,6 +942,8 @@ void FillCoarseFineGhosts(  //
     fphysbc,
     fbccomp,
     ref_ratio,
+    // Interpolator makes no difference here?
+    // &amrex::pc_interp,
     // &amrex::cell_bilinear_interp,
     &amrex::quadratic_interp,
     bcrecs,
