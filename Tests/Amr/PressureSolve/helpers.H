@@ -84,10 +84,10 @@ void CompareMultiFabs(  //
   const std::vector<LevelData>& level_data );
 
 LevelData MakeDenseLevelData(  //
-  int n,
   amrex::Real domain_length,
   int base_n,
-  int nlevels );
+  int nlevels,
+  int level );
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
@@ -110,6 +110,7 @@ void SolvePressureCorrection(  //
   int nlevels );
 
 constexpr int CalculateFineN( int base_n, int nlevels );
+constexpr int CalculateNForLevel( int base_n, int level );
 
 /*--------------------------------------------------------------------
   End of file

@@ -106,10 +106,10 @@ int MyMain()
 
   // First create and work with fine-level data
   LevelData fine_level = MakeDenseLevelData(  //
-    CalculateFineN( baseN, nlevels ),
     domain_length,
-    baseN,
-    nlevels );
+    CalculateFineN( baseN, nlevels ),
+    1,    // 1 level
+    0 );  // level zero
 
   // Loop over levels: setup geometry, mesh, fields
   std::vector<LevelData> composite_levels = MakeSparseCompositeLevels(  //

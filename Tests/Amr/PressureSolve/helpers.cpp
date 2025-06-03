@@ -216,16 +216,16 @@ static void InitializeVelocity(  //
   std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,
   int base_n,
-  int nlevels )
+  int nlevels,
+  int level )
 {
   // Set all velocities to zero
   for ( int d = 0; d < 3; ++d ) {
     velocity[d].setVal( 0.0 );
   }
 
-  const int fineN = CalculateFineN( base_n, nlevels );
-  const int halfN = fineN / 2;
-  if ( geom.Domain().length( 0 ) == fineN ) {
+  if ( level == nlevels - 1 ) {
+    const int halfN = geom.Domain().length( 0 ) / 2;
     const int i_face = halfN;
     const int j_face = halfN;
     const int k_face = halfN;
@@ -854,30 +854,42 @@ LevelData::LevelData( int n, amrex::Real domain_length )
 }
 
 LevelData MakeDenseLevelData(  //
-  int n,
   amrex::Real domain_length,
   int base_n,
-  int nlevels )
+  int nlevels,
+  int level )
 {
+  const int n = CalculateNForLevel( base_n, level );
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom, base_n, nlevels );
+  InitializeVelocity(  //
+    level_data.velocity,
+    level_data.geom,
+    base_n,
+    nlevels,
+    level );
   return level_data;
 }
 
 LevelData MakeSparseLevelData(  //
-  int n,
   amrex::Real domain_length,
   int base_n,
-  int nlevels )
+  int nlevels,
+  int level )
 {
+  const int n = CalculateNForLevel( base_n, level );
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineSparseBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom, base_n, nlevels );
+  InitializeVelocity(  //
+    level_data.velocity,
+    level_data.geom,
+    base_n,
+    nlevels,
+    level );
   return level_data;
 }
 
@@ -888,13 +900,12 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
 {
   std::vector<LevelData> composite_levels;
   for ( int lev = 0; lev < nlevels; ++lev ) {
-    int n = base_n * ( 1 << lev );
     if ( lev == 0 ) {
       composite_levels.push_back(
-        MakeDenseLevelData( n, domain_length, base_n, nlevels ) );
+        MakeDenseLevelData( domain_length, base_n, nlevels, lev ) );
     } else {
       composite_levels.push_back(
-        MakeSparseLevelData( n, domain_length, base_n, nlevels ) );
+        MakeSparseLevelData( domain_length, base_n, nlevels, lev ) );
     }
   }
   return composite_levels;
@@ -1144,7 +1155,11 @@ void SolvePressureCorrection(  //
 
 constexpr int CalculateFineN( int base_n, int nlevels )
 {
-  return base_n * ( 1 << ( nlevels - 1 ) );
+  return CalculateNForLevel( base_n, nlevels - 1 );
+}
+constexpr int CalculateNForLevel( int base_n, int level )
+{
+  return base_n * ( 1 << level );
 }
 
 /*--------------------------------------------------------------------
