@@ -584,6 +584,8 @@ void SamplePressureAlongLine(  //
     script << ", '" << filename << "' using 1:(($" << ( finest_lev + 2 ) << "-$"
            << ( finest_lev + 3 ) << ")/$" << ( finest_lev + 3 )
            << ") title '(Finest - Full Fine)/Full Fine' with linespoints";
+    script << ", 0.05 title '+/- 5%' lt 0";
+    script << ", -0.05 title '' lt 0";
     script << "\n";
     script.close();
 
