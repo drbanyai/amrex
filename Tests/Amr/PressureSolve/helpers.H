@@ -6,32 +6,23 @@
 #include <AMReX_BCRec.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
-#include <AMReX_FillPatcher.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Vector.H>
 #include <array>
-#include <memory>
 #include <vector>
 
 struct LevelData
 {
-  LevelData( int n, amrex::Real domain_length );
+  LevelData( int base_n, int level, amrex::Real domain_length );
   const amrex::Geometry geom;
   amrex::MultiFab pressure;
   std::array<amrex::MultiFab, 3> velocity;
-  std::unique_ptr<amrex::FillPatcher<amrex::MultiFab>> fillpatcher;
 
   /*--------------------------------------------------------------------
     public free function declarations
     --------------------------------------------------------------------*/
 };
-
-// Geometry and mesh setup
-amrex::Geometry DefineGeometry( int nx, int ny, int nz, double dx );
-amrex::BoxArray DefineBoxArray( int n );
-amrex::BoxArray DefineSparseBoxArray( int n );
-amrex::DistributionMapping DefineDM( const amrex::BoxArray& ba );
 
 // Data structure setup
 void DefineFABs(  //
