@@ -24,15 +24,16 @@ struct LevelData
     --------------------------------------------------------------------*/
 };
 
-// Data structure setup
-void DefineFABs(  //
-  amrex::MultiFab& pressure,
-  std::array<amrex::MultiFab, 3>& velocity,
-  const amrex::BoxArray& ba,
-  const amrex::DistributionMapping& dm );
+// Entry point for recursive composite-mesh pressure solve
+void CompositeSolve(  //
+  std::vector<LevelData>& composite_levels,
+  amrex::Real tolerance,
+  int max_iterations,
+  int base_n,
+  int nlevels );
 
-// Main pressure solver function
-void SolvePressure(  //
+// Sinle-level pressure solve
+void SingleLevelPressureSolve(  //
   amrex::MultiFab& pressure,
   const std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,

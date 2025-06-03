@@ -21,72 +21,6 @@ int MyMain();
 /*--------------------------------------------------------------------
   function definitions
   --------------------------------------------------------------------*/
-void CompositeSolve(  //
-  std::vector<LevelData>& composite_levels,
-  amrex::Real tolerance,
-  int max_iterations,
-  int base_n,
-  int nlevels,
-  int level = 0 )
-{
-  const int nLevels = composite_levels.size();
-  amrex::Print()  //
-    << "\nLevel: " << level
-    << ", domain: " << composite_levels[level].geom.Domain()
-    << ", dx = " << composite_levels[level].geom.CellSize()[0] << "\n";
-  amrex::Print()  //
-    << "  Tolerance: " << tolerance << ", Max iterations: " << max_iterations
-    << "\n";
-
-  if ( level > 0 ) {
-    // Fill ghost cells in N using N-1 results
-    FillPressureGhostCells(  //
-      composite_levels[level],
-      composite_levels[level - 1] );
-  }
-
-  // Single-level solve on N
-  SolvePressure(  //
-    composite_levels[level].pressure,
-    composite_levels[level].velocity,
-    composite_levels[level].geom,
-    tolerance,
-    max_iterations,
-    base_n,
-    nlevels );
-
-  if ( level < nLevels - 1 ) {
-    // Composite solve on N+1 and above
-    CompositeSolve(  //
-      composite_levels,
-      tolerance,
-      max_iterations,
-      base_n,
-      nlevels,
-      level + 1 );
-
-    // Correction solve on N using N+1/N flux mismatch
-    SolvePressureCorrection(  //
-      composite_levels[level].pressure,
-      composite_levels[level + 1].pressure,
-      composite_levels[level].geom,
-      composite_levels[level + 1].geom,
-      tolerance,
-      max_iterations,
-      base_n,
-      nlevels );
-
-    // Composite solve on N+1 and above, using corrected N
-    CompositeSolve(  //
-      composite_levels,
-      tolerance,
-      max_iterations,
-      base_n,
-      nlevels,
-      level + 1 );
-  }
-}
-
 int main( int argc, char** argv )
 {
   amrex::Initialize( argc, argv );
@@ -124,7 +58,7 @@ int MyMain()
   amrex::Print()                     //
     << "  Tolerance: " << tolerance  //
     << ", Max iterations: " << max_iterations << "\n";
-  SolvePressure(  //
+  SingleLevelPressureSolve(  //
     fine_level.pressure,
     fine_level.velocity,
     fine_level.geom,
