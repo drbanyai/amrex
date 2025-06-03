@@ -40,12 +40,6 @@ void DefineFABs(  //
   const amrex::BoxArray& ba,
   const amrex::DistributionMapping& dm );
 
-// Initialization
-void InitializeVelocity(  //
-  std::array<amrex::MultiFab, 3>& velocity,
-  const amrex::Geometry& geom,
-  int fineN );
-
 // Main pressure solver function
 void SolvePressure(  //
   amrex::MultiFab& pressure,
@@ -86,13 +80,15 @@ void CompareMultiFabs(  //
   const LevelData& expected_level,
   const std::vector<LevelData>& level_data );
 
-LevelData MakeDenseLevelData( int n, amrex::Real domain_length, int fineN );
-LevelData MakeSparseLevelData( int n, amrex::Real domain_length, int fineN );
+LevelData MakeDenseLevelData(  //
+  int n,
+  amrex::Real domain_length,
+  int base_n,
+  int nlevels );
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
-  amrex::Real domain_length,
-  int fineN );
+  amrex::Real domain_length );
 
 // Fill ghost cells for pressure field between AMR levels
 void FillPressureGhostCells(  //

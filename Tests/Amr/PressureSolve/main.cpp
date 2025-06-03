@@ -102,14 +102,17 @@ int MyMain()
   constexpr int max_iterations = 500;
 
   // First create and work with fine-level data
-  LevelData fine_level = MakeDenseLevelData( fineN, domain_length, fineN );
+  LevelData fine_level = MakeDenseLevelData(  //
+    fineN,
+    domain_length,
+    baseN,
+    nlevels );
 
   // Loop over levels: setup geometry, mesh, fields
   std::vector<LevelData> composite_levels = MakeSparseCompositeLevels(  //
     baseN,
     nlevels,
-    domain_length,
-    fineN );
+    domain_length );
 
   // Work with fine-level data
   amrex::Print()  //

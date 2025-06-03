@@ -212,11 +212,13 @@ void DefineFABs(  //
   }
 }
 
-void InitializeVelocity(  //
+static void InitializeVelocity(  //
   std::array<amrex::MultiFab, 3>& velocity,
   const amrex::Geometry& geom,
-  int fineN )
+  int base_n,
+  int nlevels )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   // Set all velocities to zero
   for ( int d = 0; d < 3; ++d ) {
     velocity[d].setVal( 0.0 );
@@ -846,41 +848,48 @@ LevelData::LevelData( int n, amrex::Real domain_length )
 {
 }
 
-LevelData MakeDenseLevelData( int n, amrex::Real domain_length, int fineN )
+LevelData MakeDenseLevelData(  //
+  int n,
+  amrex::Real domain_length,
+  int base_n,
+  int nlevels )
 {
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom, fineN );
+  InitializeVelocity( level_data.velocity, level_data.geom, base_n, nlevels );
   return level_data;
 }
 
-LevelData MakeSparseLevelData( int n, amrex::Real domain_length, int fineN )
+LevelData MakeSparseLevelData(  //
+  int n,
+  amrex::Real domain_length,
+  int base_n,
+  int nlevels )
 {
   LevelData level_data( n, domain_length );
   const amrex::BoxArray ba = DefineSparseBoxArray( n );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
-  InitializeVelocity( level_data.velocity, level_data.geom, fineN );
+  InitializeVelocity( level_data.velocity, level_data.geom, base_n, nlevels );
   return level_data;
 }
 
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
-  amrex::Real domain_length,
-  int fineN )
+  amrex::Real domain_length )
 {
   std::vector<LevelData> composite_levels;
   for ( int lev = 0; lev < nlevels; ++lev ) {
     int n = base_n * ( 1 << lev );
     if ( lev == 0 ) {
       composite_levels.push_back(
-        MakeDenseLevelData( n, domain_length, fineN ) );
+        MakeDenseLevelData( n, domain_length, base_n, nlevels ) );
     } else {
       composite_levels.push_back(
-        MakeSparseLevelData( n, domain_length, fineN ) );
+        MakeSparseLevelData( n, domain_length, base_n, nlevels ) );
     }
   }
   return composite_levels;
@@ -983,7 +992,7 @@ void FillPressureGhostCells(  //
       crse_level.geom,
       nghost,
       ncomp,
-      &amrex::quadratic_interp ); // Doesn't make a difference?
+      &amrex::quadratic_interp );  // Doesn't make a difference?
   }
 
   // Fill ghost cells using FillPatcher
@@ -1014,6 +1023,7 @@ void FillPressureGhostCells(  //
     0                            // Boundary condition component
   );
 #else
+  (void)fineN;
   // Exactly the same result?
   FillCoarseFineGhosts(  //
     fine_level.pressure,
