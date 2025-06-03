@@ -25,9 +25,11 @@ void CompositeSolve(  //
   std::vector<LevelData>& composite_levels,
   amrex::Real tolerance,
   int max_iterations,
-  int fineN,
+  int base_n,
+  int nlevels,
   int level = 0 )
 {
+  const int fineN = base_n * ( 1 << ( nlevels - 1 ) );
   const int nLevels = composite_levels.size();
   amrex::Print()  //
     << "\nLevel: " << level
@@ -59,7 +61,8 @@ void CompositeSolve(  //
       composite_levels,
       tolerance,
       max_iterations,
-      fineN,
+      base_n,
+      nlevels,
       level + 1 );
 
     // Correction solve on N using N+1/N flux mismatch
@@ -77,7 +80,8 @@ void CompositeSolve(  //
       composite_levels,
       tolerance,
       max_iterations,
-      fineN,
+      base_n,
+      nlevels,
       level + 1 );
   }
 }
@@ -130,7 +134,7 @@ int MyMain()
   CheckResults( fine_level.pressure, fine_level.geom, fineN );
 
   // Solve on the full composite mesh
-  CompositeSolve( composite_levels, tolerance, max_iterations, fineN );
+  CompositeSolve( composite_levels, tolerance, max_iterations, baseN, nlevels );
 
   amrex::Print() << "\nChecking results for all levels\n";
   for ( int lev = 0; lev < nlevels; ++lev ) {
