@@ -105,9 +105,8 @@ int MyMain()
   constexpr int max_iterations = 500;
 
   // First create and work with fine-level data
-  constexpr int fineN = baseN * ( 1 << ( nlevels - 1 ) );
   LevelData fine_level = MakeDenseLevelData(  //
-    fineN,
+    CalculateFineN( baseN, nlevels ),
     domain_length,
     baseN,
     nlevels );

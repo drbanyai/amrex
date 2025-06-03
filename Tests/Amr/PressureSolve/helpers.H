@@ -109,6 +109,8 @@ void SolvePressureCorrection(  //
   int base_n,
   int nlevels );
 
+constexpr int CalculateFineN( int base_n, int nlevels );
+
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/
