@@ -158,17 +158,19 @@ amrex::Geometry DefineGeometry( int nx, int ny, int nz, double dx )
   return amrex::Geometry( domain, real_box, coord, is_periodic );
 }
 
-amrex::BoxArray DefineBoxArray( int n )
+amrex::BoxArray DefineBoxArray( int base_n, int level )
 {
+  const int n = CalculateNForLevel( base_n, level );
   const amrex::Box domainBox( amrex::IntVect( 0, 0, 0 ),
                               amrex::IntVect( n - 1, n - 1, n - 1 ) );
   return amrex::BoxArray( domainBox );
 }
 
-amrex::BoxArray DefineSparseBoxArray( int n )
+amrex::BoxArray DefineSparseBoxArray( int base_n, int level )
 {
-  const int lo = ( n / 2 ) - 2;
-  const int hi = ( n / 2 ) + 1;
+  const int n = CalculateNForLevel( base_n, level );
+  const int lo = ( n / 2 ) - base_n / 2;
+  const int hi = ( n / 2 ) + base_n / 2 - 1;
   const amrex::Box sparseBox( amrex::IntVect( lo, lo, lo ),
                               amrex::IntVect( hi, hi, hi ) );
   return amrex::BoxArray( sparseBox );
@@ -861,7 +863,7 @@ LevelData MakeDenseLevelData(  //
 {
   const int n = CalculateNForLevel( base_n, level );
   LevelData level_data( n, domain_length );
-  const amrex::BoxArray ba = DefineBoxArray( n );
+  const amrex::BoxArray ba = DefineBoxArray( base_n, level );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
   InitializeVelocity(  //
@@ -881,7 +883,7 @@ LevelData MakeSparseLevelData(  //
 {
   const int n = CalculateNForLevel( base_n, level );
   LevelData level_data( n, domain_length );
-  const amrex::BoxArray ba = DefineSparseBoxArray( n );
+  const amrex::BoxArray ba = DefineSparseBoxArray( base_n, level );
   const amrex::DistributionMapping dm = DefineDM( ba );
   DefineFABs( level_data.pressure, level_data.velocity, ba, dm );
   InitializeVelocity(  //
