@@ -80,6 +80,14 @@ static void SolvePressureIterations(  //
   int max_iterations,
   int base_n,
   int nlevels );
+static amrex::Real Phi(  //
+  amrex::Real r_x,
+  amrex::Real r_y,
+  amrex::Real r_z,
+  amrex::Real ri_x,
+  amrex::Real ri_y,
+  amrex::Real ri_z,
+  amrex::Real dx );
 
 /*--------------------------------------------------------------------
   public free function definitions
@@ -176,47 +184,28 @@ static amrex::Real ExpectedPressure(  //
   int base_n,
   int nlevels )
 {
-  // Analytic solution for a dipole in infinite domain:
-  // p(r) = -1/(4*pi) * (1/|r - r1| - 1/|r - r2|)
+  // Get the cell center coordinates for the target point
   const amrex::Real x = geom.CellCenter( i, U );
   const amrex::Real y = geom.CellCenter( j, V );
   const amrex::Real z = geom.CellCenter( k, W );
 
-  // The nonzero x-face is at (coarse_face[0], coarse_face[1], coarse_face[2]),
-  // between cells (coarse_face[0]-1, coarse_face[1], coarse_face[2]) and
-  // (coarse_face[0], coarse_face[1], coarse_face[2])
-  // Cell center of cell to the left of the face
+  // Calculate the source positions (centers of the source cubes)
   const int fineN = CalculateFineN( base_n, nlevels );
-  const amrex::Real centerMinus = ( ( fineN / 2.0 ) - 0.5 ) / fineN;
-  // Cell center of cell to the right of the face
-  const amrex::Real centerPlus = ( ( fineN / 2.0 ) + 0.5 ) / fineN;
+  const amrex::Real dx = 1.0 / fineN;  // Cube size
+  const amrex::Real centerMinus = ( ( fineN / 2.0 ) - 0.5 ) /
+                                  fineN;  // Left source cube center
+  const amrex::Real centerPlus = ( ( fineN / 2.0 ) + 0.5 ) /
+                                 fineN;  // Right source cube center
 
-  const amrex::Real r1_x = centerMinus;  // cell center to the left
-  const amrex::Real r2_x = centerPlus;   // cell center to the right
-  const amrex::Real r1_y = centerPlus;   // face center
-  const amrex::Real r2_y = centerPlus;   // face center
-  const amrex::Real r1_z = centerPlus;   // face center
-  const amrex::Real r2_z = centerPlus;   // face center
+  // Compute the potential from each source cube
+  const amrex::Real phi1 =
+    Phi( x, y, z, centerMinus, centerPlus, centerPlus, dx );
+  const amrex::Real phi2 =
+    Phi( x, y, z, centerPlus, centerPlus, centerPlus, dx );
 
-  // Use cell-averaged inverse distance for source cells, pointwise otherwise
-  const amrex::Real h = 1.0 / fineN;
-  const amrex::Real avg_inv_r = 2.0 * 1.516386 / h;  // <1/r> over the cube
+  // Sum the contributions from the two source cubes
+  const amrex::Real p = -1.0 * phi1 + phi2;
 
-  const amrex::Real dist1 =                   //
-    std::sqrt( ( x - r1_x ) * ( x - r1_x ) +  //
-               ( y - r1_y ) * ( y - r1_y ) +  //
-               ( z - r1_z ) * ( z - r1_z ) );
-  const amrex::Real dist2 =                   //
-    std::sqrt( ( x - r2_x ) * ( x - r2_x ) +  //
-               ( y - r2_y ) * ( y - r2_y ) +  //
-               ( z - r2_z ) * ( z - r2_z ) );
-
-  // Use cell-averaged inverse distance if the evaluation point coincides with
-  // the source, otherwise use pointwise inverse distance
-  const amrex::Real tol = 1e-5;
-  const amrex::Real inv_dist1 = ( dist1 < tol ) ? avg_inv_r : 1.0 / dist1;
-  const amrex::Real inv_dist2 = ( dist2 < tol ) ? avg_inv_r : 1.0 / dist2;
-  const amrex::Real p = -1.0 / ( 4.0 * M_PI ) * ( inv_dist1 - inv_dist2 );
   return p;
 }
 
@@ -1292,6 +1281,71 @@ constexpr int CalculateNForLevel( int base_n, int level )
   return base_n * ( 1 << level );
 }
 
+// Compute the potential at r due to a uniform source cube of size dx centered
+// at ri This is (1/4π) * (1/dx³) * ∫∫∫_source_cube 1/|r-r'| dV' Note: r and ri
+// are always at cell centers
+static amrex::Real Phi(  //
+  amrex::Real r_x,
+  amrex::Real r_y,
+  amrex::Real r_z,
+  amrex::Real ri_x,
+  amrex::Real ri_y,
+  amrex::Real ri_z,
+  amrex::Real dx )
+{
+  constexpr bool point_wise = false;
+  {
+    // Compute distance from r to center of source cube
+    const amrex::Real dr_x = r_x - ri_x;
+    const amrex::Real dr_y = r_y - ri_y;
+    const amrex::Real dr_z = r_z - ri_z;
+    const amrex::Real r2 = dr_x * dr_x + dr_y * dr_y + dr_z * dr_z;
+
+    // If r is at the same cell center as ri, use analytic solution
+    if ( r2 < 1.0e-8 ) {  // Effectively zero distance
+      // Analytic solution for self-potential at the center of the cube
+      return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
+    } else if ( point_wise ) {
+      return 1.0 / ( 4.0 * M_PI * std::sqrt( r2 ) );
+    }
+  }
+
+  // For all other cell centers, use numerical integration
+  amrex::Real sum = 0.0;
+  const amrex::Real half_dx = 0.5 * dx;
+  constexpr amrex::Real sqrt3over5 = 0.7745966692414834;
+  // Use a 3x3x3 quadrature rule (27 points) for better accuracy
+  for ( int i = -1; i <= 1; i++ ) {
+    for ( int j = -1; j <= 1; j++ ) {
+      for ( int k = -1; k <= 1; k++ ) {
+        // √(3/5)
+        const amrex::Real x = ri_x + i * half_dx * sqrt3over5;
+        const amrex::Real y = ri_y + j * half_dx * sqrt3over5;
+        const amrex::Real z = ri_z + k * half_dx * sqrt3over5;
+
+        const amrex::Real dr_x = r_x - x;
+        const amrex::Real dr_y = r_y - y;
+        const amrex::Real dr_z = r_z - z;
+        const amrex::Real r = std::sqrt( dr_x * dr_x + dr_y * dr_y +
+                                         dr_z * dr_z );
+
+        // Use Gauss-Legendre weights
+        const amrex::Real w = ( i == 0 ? 0.8888888888888888
+                                       : 0.5555555555555556 ) *
+                              ( j == 0 ? 0.8888888888888888
+                                       : 0.5555555555555556 ) *
+                              ( k == 0 ? 0.8888888888888888
+                                       : 0.5555555555555556 );
+
+        sum += w / r;
+      }
+    }
+  }
+
+  // The quadrature weights are normalized to sum to 8 (the volume of the
+  // cube) So we just need to multiply by 1/4π
+  return ( 1.0 / ( 4.0 * M_PI ) ) * ( sum / 8.0 );
+}
 /*--------------------------------------------------------------------
   End of file
   --------------------------------------------------------------------*/
