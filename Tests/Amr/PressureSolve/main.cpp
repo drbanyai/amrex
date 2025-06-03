@@ -41,8 +41,7 @@ void CompositeSolve(  //
     // Fill ghost cells in N using N-1 results
     FillPressureGhostCells(  //
       composite_levels[level],
-      composite_levels[level - 1],
-      fineN );
+      composite_levels[level - 1] );
   }
 
   // Single-level solve on N

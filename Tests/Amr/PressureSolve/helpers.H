@@ -93,8 +93,7 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
 // Fill ghost cells for pressure field between AMR levels
 void FillPressureGhostCells(  //
   LevelData& fine_level,
-  const LevelData& crse_level,
-  int fineN );
+  const LevelData& crse_level );
 
 // Solve for pressure correction between AMR levels
 void SolvePressureCorrection(  //
