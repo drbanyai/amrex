@@ -7,6 +7,7 @@
   standard includes
   --------------------------------------------------------------------*/
 #include <AMReX.H>
+#include <AMReX_ParmParse.H>
 
 /*--------------------------------------------------------------------
   non-standard includes
@@ -31,9 +32,17 @@ int main( int argc, char** argv )
 
 int MyMain()
 {
-  // Number of levels (AMR-ready, even if only single-level for now)
-  constexpr int nlevels = 3;
-  constexpr int baseN = 4;
+  // Parse command line parameters
+  int nlevels = 2;
+  int baseN = 4;
+  {
+    amrex::ParmParse pp;
+    pp.query( "n_levels", nlevels );
+    pp.query( "base_n", baseN );
+
+    amrex::Print() << "nlevels: " << nlevels << ", baseN: " << baseN << "\n";
+  }
+
   constexpr amrex::Real domain_length = 1.0;  // meters
   constexpr amrex::Real tolerance = 1.0e-8;
   constexpr int max_iterations = 500;
