@@ -528,10 +528,10 @@ void SamplePressureAlongLine(  //
     const amrex::Box& fine_domain = fine_geom.Domain();
 
     // For each level, sample pressure at (i, center_j, center_k)
-    const int j = static_cast<int>( ( center_y - fine_geom.ProbLo( 1 ) ) /
-                                    fine_geom.CellSize( 1 ) );
-    const int k = static_cast<int>( ( center_z - fine_geom.ProbLo( 2 ) ) /
-                                    fine_geom.CellSize( 2 ) );
+    amrex::Real point[AMREX_SPACEDIM] = { 0.5, center_y, center_z };
+    amrex::IntVect cell_idx = fine_geom.CellIndex( point );
+    const int j = cell_idx[1];
+    const int k = cell_idx[2];
 
     for ( int i = fine_domain.smallEnd( 0 ); i <= fine_domain.bigEnd( 0 );
           ++i ) {
@@ -599,36 +599,55 @@ void SamplePressureAlongLine(  //
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
     script << "set yrange [-1.5:1.5]\n";  // DEBUG
-    script << "plot '" << filename << "' using 1:" << ( finest_lev + 4 )
+    script << "plot";
+    script << " \\\n  '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
-      script << ", '" << filename << "' using 1:" << ( lev + 2 )
+      script << " \\\n, '" << filename << "' using 1:" << ( lev + 2 )
              << " title 'Level " << lev << "'"
              << " with linespoints linewidth 2 pointsize 2";
     }
-    script << ", '" << filename << "' using 1:" << ( finest_lev + 3 )
-           << " title 'Full Fine' with linespoints linewidth 2 pointsize 2";
+    script << " \\\n, '" << filename << "' using 1:" << ( finest_lev + 3 )
+           << " title 'Dense' with linespoints linewidth 2 pointsize 2";
     script << "\n";
-    script << "set output 'pressure_error.png'\n";
+    script << "set output 'pressure_error_relative.png'\n";
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (unitless)'\n";
     script << "set yrange [*:*]\n";
     script << "set yrange [-0.5:0.5]\n";  // DEBUG
     script << "plot";
     // Error: full fine solution minus analytic
-    script << " '" << filename << "' using 1:(($" << ( finest_lev + 3 ) << "-$"
-           << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
-           << ") title '(Full Fine - Analytic)/Analytic' with linespoints";
+    script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
+           << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
+           << ")) title '(Dense - Analytic)/abs(Analytic)' with linespoints";
     // Error: finest level minus analytic
-    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 2 ) << "-$"
-           << ( finest_lev + 4 ) << ")/$" << ( finest_lev + 4 )
-           << ") title '(Finest - Analytic)/Analytic' with linespoints";
+    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
+           << ")) title '(Fine - Analytic)/abs(Analytic)' with linespoints";
     // Error: finest level minus full fine
-    script << ", '" << filename << "' using 1:(($" << ( finest_lev + 2 ) << "-$"
-           << ( finest_lev + 3 ) << ")/$" << ( finest_lev + 3 )
-           << ") title '(Finest - Full Fine)/Full Fine' with linespoints";
-    script << ", 0.05 title '+/- 5%' lt 0";
-    script << ", -0.05 title '' lt 0";
+    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
+           << ")) title '(Fine - Dense)/abs(Dense)' with linespoints";
+    script << " \\\n,  0.05 title '+/- 5%' lt 0";
+    script << " \\\n, -0.05 title '' lt 0";
+    script << "\n";
+    script << "set output 'pressure_error_abs.png'\n";
+    script << "set xlabel 'x (m)'\n";
+    script << "set ylabel 'Pressure Error (Pa)'\n";
+    script << "set yrange [*:*]\n";
+    script << "plot";
+    // Error: full fine solution minus analytic
+    script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
+           << "-$" << ( finest_lev + 4 )
+           << ")) title 'Dense - Analytic' with linespoints";
+    // Error: finest level minus analytic
+    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 4 )
+           << ")) title 'Fine - Analytic' with linespoints";
+    // Error: finest level minus full fine
+    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+           << "-$" << ( finest_lev + 3 )
+           << ")) title 'Fine - Dense' with linespoints";
     script << "\n";
     script.close();
 
