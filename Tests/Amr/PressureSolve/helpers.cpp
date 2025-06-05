@@ -432,6 +432,48 @@ void SamplePressureAlongLine(  //
   const amrex::Real center_z = 0.5 * ( fine_geom.ProbLo( 2 ) +
                                        fine_geom.ProbHi( 2 ) );
 
+  // Write raw level 0 pressure values to CSV for debugging
+  if ( amrex::ParallelDescriptor::IOProcessor() ) {
+    std::ofstream raw_outfile( "pressure_L0.csv" );
+    raw_outfile << "x,raw_pressure_L0,analytic\n";
+
+    const amrex::Geometry& level0_geom = level_data[0].geom;
+    const amrex::Box& level0_domain = level0_geom.Domain();
+    amrex::Real point[AMREX_SPACEDIM] = { 0.5, center_y, center_z };
+    amrex::IntVect cell_idx = level0_geom.CellIndex( point );
+    const int j0 = cell_idx[1];
+    const int k0 = cell_idx[2];
+
+    for ( int i = level0_domain.smallEnd( 0 ); i <= level0_domain.bigEnd( 0 );
+          ++i ) {
+      const amrex::Real x = level0_geom.CellCenter( i, 0 );
+      amrex::Real val = 0.0;
+      bool found = false;
+      for ( amrex::MFIter mfi( level_data[0].pressure ); mfi.isValid();
+            ++mfi ) {
+        const amrex::Box& box = mfi.validbox();
+        if ( box.contains( amrex::IntVect( i, j0, k0 ) ) ) {
+          const auto& parr = level_data[0].pressure.array( mfi );
+          val = parr( i, j0, k0 );
+          found = true;
+          break;
+        }
+      }
+      if ( !found ) {
+        amrex::Print() << "No raw value found for level 0 at (i, j, k) = (" << i
+                       << ", " << j0 << ", " << k0 << ")\n";
+      }
+      const amrex::Real expected = ExpectedPressure( level0_geom,
+                                                     i,
+                                                     j0,
+                                                     k0,
+                                                     base_n,
+                                                     nLevels );
+      raw_outfile << x << "," << val << "," << expected << "\n";
+    }
+    raw_outfile.close();
+  }
+
   // Create MultiFabs to store interpolated pressure at each level
   amrex::Vector<amrex::MultiFab> interpolated_pressure( level_data.size() );
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
@@ -602,6 +644,8 @@ void SamplePressureAlongLine(  //
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
+    script << " \\\n, 'pressure_L0.csv' using 1:2 title 'Raw Level 0'"
+           << " with linespoints pointsize 2 linewidth 2";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
       script << " \\\n, '" << filename << "' using 1:" << ( lev + 2 )
              << " title 'Level " << lev << "'"
@@ -628,6 +672,10 @@ void SamplePressureAlongLine(  //
     script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
            << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
            << ")) title '(Fine - Dense)/abs(Dense)' with linespoints";
+    // Error: raw level 0 minus analytic
+    script << " \\\n, 'pressure_L0.csv' using 1:(($2-$3)/abs($3))"
+           << " title '(Raw L0 - Analytic)/abs(Analytic)' with linespoints "
+              "pointsize 2";
     script << " \\\n,  0.05 title '+/- 5%' lt 0";
     script << " \\\n, -0.05 title '' lt 0";
     script << "\n";
@@ -648,6 +696,9 @@ void SamplePressureAlongLine(  //
     script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
            << "-$" << ( finest_lev + 3 )
            << ")) title 'Fine - Dense' with linespoints";
+    // Error: raw level 0 minus analytic
+    script << " \\\n, 'pressure_L0.csv' using 1:($2-$3)"
+           << " title 'Raw L0 - Analytic' with linespoints pointsize 2";
     script << "\n";
     script.close();
 
