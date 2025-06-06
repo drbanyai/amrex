@@ -462,16 +462,22 @@ void SamplePressureAlongLine(  //
   }
 
   // Create MultiFabs to store interpolated pressure at each level
-  amrex::Vector<amrex::MultiFab> interpolated_pressure( level_data.size() );
-  amrex::Vector<amrex::MultiFab> dense_level_pressure( level_data.size() );
+  amrex::Vector<amrex::MultiFab> full_domain_interpolated_pressure(
+    level_data.size() );
+  amrex::Vector<amrex::MultiFab> partial_domain_interpolated_pressure(
+    level_data.size() );
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
     const amrex::BoxArray& fine_ba = full_fine_pressure.boxArray();
     const amrex::DistributionMapping fine_dm = DefineIOProcessorDM( fine_ba );
     const int ncomp = fullFineSolution.pressure.nComp();
     const int nGrow = fullFineSolution.pressure.nGrow();
     // Define MultiFab with same structure as full fine pressure.
-    interpolated_pressure[lev].define( fine_ba, fine_dm, ncomp, nGrow );
-    interpolated_pressure.at( lev ).setVal( 0.0 );
+    full_domain_interpolated_pressure[lev].define(  //
+      fine_ba,
+      fine_dm,
+      ncomp,
+      nGrow );
+    full_domain_interpolated_pressure.at( lev ).setVal( 0.0 );
 
     // Calculate refinement ratio between fine level and current level
     const amrex::Box& fine_domain = level_data[finest_lev].geom.Domain();
@@ -487,14 +493,21 @@ void SamplePressureAlongLine(  //
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(  //
       ratio >= 1,
       "Fine level must be refined version of current level" );
-    const amrex::BoxArray& dense_ba = amrex::coarsen( fine_ba, ratio );
+    const amrex::BoxArray& partial_domain_ba =
+      amrex::refine( level_data[lev].pressure.boxArray(), ratio );
     amrex::Print() << "Fine box array: " << fine_ba << "\n";
-    amrex::Print() << "Dense box array: " << dense_ba << "\n";
+    amrex::Print() << "Partial domain box array: " << partial_domain_ba << "\n";
     // Use same IOProcessor DistributionMapping for dense level
-    const amrex::DistributionMapping dense_dm = DefineIOProcessorDM( dense_ba );
-    dense_level_pressure[lev].define( dense_ba, dense_dm, ncomp, nGrow );
-    dense_level_pressure.at( lev ).setVal( 0.0 );
-    dense_level_pressure.at( lev ).ParallelCopy( level_data[lev].pressure );
+    const amrex::DistributionMapping partial_domain_dm = DefineIOProcessorDM(
+      partial_domain_ba );
+    partial_domain_interpolated_pressure[lev].define(  //
+      partial_domain_ba,
+      partial_domain_dm,
+      ncomp,
+      nGrow );
+    partial_domain_interpolated_pressure.at( lev ).setVal( 0.0 );
+    // partial_domain_interpolated_pressure.at( lev ).ParallelCopy(
+    // level_data[lev].pressure );
 
     // Print some debug info
     if ( amrex::ParallelDescriptor::IOProcessor() ) {
@@ -502,7 +515,7 @@ void SamplePressureAlongLine(  //
         << "\nLevel " << lev  //
         << " domain info (ratio = " << ratio << "):\n"
         << "  Original domain: " << current_domain << "\n"
-        << "  Dense box array: " << dense_ba << "\n"
+        << "  Partial domain box array: " << partial_domain_ba << "\n"
         << "  Sparse box array: " << level_data[lev].pressure.boxArray()
         << "\n";
     }
@@ -516,7 +529,11 @@ void SamplePressureAlongLine(  //
   }
 
   // For each level, do a single interpolation from dense data to fine grid
-  for ( int lev = 0; lev < finest_lev; ++lev ) {
+  for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    if ( lev > 0 ) {
+      full_domain_interpolated_pressure[lev].ParallelCopy(  //
+        full_domain_interpolated_pressure[lev - 1] );
+    }
     // Calculate refinement ratio between this level and finest level
     const int level_ratio = 1 << ( finest_lev - lev );
     const amrex::IntVect ref_ratio( level_ratio, level_ratio, level_ratio );
@@ -536,21 +553,21 @@ void SamplePressureAlongLine(  //
     amrex::PhysBCFunct<PressureBndryFunc> fine_physbc( fine_geom, bcr, pbf );
 
     // Do a single interpolation from coarse to fine
-    amrex::InterpFromCoarseLevel(  //
-      interpolated_pressure[lev],  // fine MultiFab
-      amrex::IntVect( 0 ),         // nghost
-      0.0,                         // time
-      dense_level_pressure[lev],   // coarse MultiFab
-      0,                           // scomp
-      0,                           // dcomp
-      1,                           // ncomp
-      level_data[lev].geom,        // coarse geometry
-      fine_geom,                   // fine geometry
-      crse_physbc,                 // coarse boundary conditions
-      0,                           // cbccomp
-      fine_physbc,                 // fine boundary conditions
-      0,                           // fbccomp
-      ref_ratio,                   // refinement ratio
+    amrex::InterpFromCoarseLevel(                 //
+      partial_domain_interpolated_pressure[lev],  // fine MultiFab
+      amrex::IntVect( 0 ),                        // nghost
+      0.0,                                        // time
+      level_data[lev].pressure,                   // coarse MultiFab
+      0,                                          // scomp
+      0,                                          // dcomp
+      1,                                          // ncomp
+      level_data[lev].geom,                       // coarse geometry
+      fine_geom,                                  // fine geometry
+      crse_physbc,                                // coarse boundary conditions
+      0,                                          // cbccomp
+      fine_physbc,                                // fine boundary conditions
+      0,                                          // fbccomp
+      ref_ratio,                                  // refinement ratio
       // Interpolator makes a significant difference here
       &amrex::pc_interp,
       // &amrex::cell_bilinear_interp,
@@ -559,6 +576,9 @@ void SamplePressureAlongLine(  //
       bcr,  // boundary conditions
       0     // bcrcomp
     );
+    full_domain_interpolated_pressure[lev].ParallelCopy(
+      partial_domain_interpolated_pressure[lev] );
+
 
     if ( amrex::ParallelDescriptor::IOProcessor() ) {
       amrex::Print()                       //
@@ -570,8 +590,8 @@ void SamplePressureAlongLine(  //
   }
 
   // For the finest level, just copy the data directly
-  interpolated_pressure[finest_lev].ParallelCopy(
-    dense_level_pressure[finest_lev] );
+  full_domain_interpolated_pressure[finest_lev].ParallelCopy(
+    level_data[finest_lev].pressure );
 
   // Only rank 0 process should write output files
   if ( amrex::ParallelDescriptor::IOProcessor() ) {
@@ -603,11 +623,13 @@ void SamplePressureAlongLine(  //
       for ( int lev = 0; lev <= finest_lev; ++lev ) {
         amrex::Real val = 0.0;
         bool found = false;
-        for ( amrex::MFIter mfi( interpolated_pressure[lev] ); mfi.isValid();
+        for ( amrex::MFIter mfi( full_domain_interpolated_pressure[lev] );
+              mfi.isValid();
               ++mfi ) {
           const amrex::Box& box = mfi.validbox();
           if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
-            const auto& parr = interpolated_pressure[lev].array( mfi );
+            const auto& parr = full_domain_interpolated_pressure[lev].array(
+              mfi );
             val = parr( i, j, k );
             found = true;
             break;
@@ -668,7 +690,7 @@ void SamplePressureAlongLine(  //
     script << "set ylabel 'Pressure (Pa)'\n";
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
-    //     script << "set yrange [-1.5:1.5]\n";  // DEBUG
+    script << "set yrange [-1.5:1.5]\n";  // DEBUG
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
@@ -714,20 +736,23 @@ void SamplePressureAlongLine(  //
     script << "set yrange [*:*]\n";
     // script << "set yrange [-0.5:0.5]\n";  // DEBUG
     script << "plot";
+    if ( finest_lev > 0 ) {
+      // Error: finest level minus full fine
+      script  //
+        << " \\\n '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+        << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
+        << ")) title '(Composite - Dense)/abs(Dense)' with linespoints lw 2,";
+      // Error: finest level minus analytic
+    }
     // Error: full fine solution minus analytic
     script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
            << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
            << ")) title '(Dense - Analytic)/abs(Analytic)' with linespoints";
     if ( finest_lev > 0 ) {
-      // Error: finest level minus analytic
-      script
+      script  //
         << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
         << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
         << ")) title '(Composite - Analytic)/abs(Analytic)' with linespoints";
-      // Error: finest level minus full fine
-      script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-             << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
-             << ")) title '(Composite - Dense)/abs(Dense)' with linespoints";
       // Error: raw level 0 minus analytic
       // script << " \\\n, '" << filename0 << "' using 1:(($2-$3)/abs($3))"
       //        << " title '(Raw L0 - Analytic)/abs(Analytic)' with linespoints
@@ -743,6 +768,12 @@ void SamplePressureAlongLine(  //
     script << "set yrange [*:*]\n";
     script << "#set yrange [-0.15:0.15]\n";  // DEBUG
     script << "plot";
+    if ( finest_lev > 0 ) {
+      // Error: finest level minus full fine
+      script << " \\\n '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+             << "-$" << ( finest_lev + 3 )
+             << ")) title 'Composite - Dense' with linespoints lw 2,";
+    }
     // Error: full fine solution minus analytic
     script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
            << "-$" << ( finest_lev + 4 )
@@ -752,10 +783,6 @@ void SamplePressureAlongLine(  //
       script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
              << "-$" << ( finest_lev + 4 )
              << ")) title 'Composite - Analytic' with linespoints";
-      // Error: finest level minus full fine
-      script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-             << "-$" << ( finest_lev + 3 )
-             << ")) title 'Composite - Dense' with linespoints";
       // Error: raw level 0 minus analytic
       // script << " \\\n, 'pressure_L0.csv' using 1:($2-$3)"
       //        << " title 'Raw L0 - Analytic' with linespoints pointsize 2";

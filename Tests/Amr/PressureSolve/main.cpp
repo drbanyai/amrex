@@ -34,7 +34,7 @@ int MyMain()
 {
   // Parse command line parameters
   int nlevels = 3;
-  int baseN = 8;
+  int baseN = 4;
   bool dense = true;
   amrex::Real domain_length = 1.0;  // meters
   amrex::Real tolerance = 1.0e-8;
