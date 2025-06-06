@@ -193,6 +193,7 @@ void RecursiveCompositeSolve(  //
       level + 1 );
   }
 }
+
 static amrex::Real ExpectedPressure(  //
   const amrex::Geometry& geom,
   int i,
@@ -208,11 +209,11 @@ static amrex::Real ExpectedPressure(  //
 
   // Calculate the source positions (centers of the source cubes)
   const int fineN = CalculateFineN( base_n, nLevels );
-  const amrex::Real dx = 1.0 / fineN;  // Cube size
-  const amrex::Real centerMinus = ( ( fineN / 2.0 ) - 0.5 ) /
-                                  fineN;  // Left source cube center
-  const amrex::Real centerPlus = ( ( fineN / 2.0 ) + 0.5 ) /
-                                 fineN;  // Right source cube center
+  const amrex::Real dx = geom.CellSize( 0 );
+  const amrex::Real centerMinus =       //
+    ( ( fineN / 2.0 ) - 0.5 ) / fineN;  // Left source cube center
+  const amrex::Real centerPlus =        //
+    ( ( fineN / 2.0 ) + 0.5 ) / fineN;  // Right source cube center
 
   // Compute the contribution to the potential from each source cube
   const amrex::Real phi1 =
@@ -273,26 +274,26 @@ amrex::Geometry DefineGeometry(  //
   int level,
   amrex::Real domain_length )
 {
-  const int nx = CalculateNForLevel( base_n, level );
-  const int ny = nx;
-  const int nz = nx;
-  const amrex::Real dx = domain_length / nx;
-  const amrex::RealBox real_box( { 0.0, 0.0, 0.0 },
-                                 { nx * dx, ny * dx, nz * dx } );
+  const int n = CalculateNForLevel( base_n, level );
+  const amrex::Real dx = domain_length / n;
+  const amrex::RealBox real_box(  //
+    { 0.0, 0.0, 0.0 },
+    { n * dx, n * dx, n * dx } );
   constexpr amrex::CoordSys::CoordType coord =
     amrex::CoordSys::CoordType::cartesian;
   const amrex::IntArray is_periodic{ 0, 0, 0 };  // Non-periodic
-
-  const amrex::Box domain( amrex::IntVect( 0, 0, 0 ),
-                           amrex::IntVect( nx - 1, ny - 1, nz - 1 ) );
+  const amrex::Box domain(                       //
+    amrex::IntVect( 0, 0, 0 ),
+    amrex::IntVect( n - 1, n - 1, n - 1 ) );
   return amrex::Geometry( domain, real_box, coord, is_periodic );
 }
 
 amrex::BoxArray DefineBoxArray( int base_n, int level )
 {
   const int n = CalculateNForLevel( base_n, level );
-  const amrex::Box domainBox( amrex::IntVect( 0, 0, 0 ),
-                              amrex::IntVect( n - 1, n - 1, n - 1 ) );
+  const amrex::Box domainBox(  //
+    amrex::IntVect( 0, 0, 0 ),
+    amrex::IntVect( n - 1, n - 1, n - 1 ) );
   return amrex::BoxArray( domainBox );
 }
 
@@ -301,8 +302,9 @@ amrex::BoxArray DefineSparseBoxArray( int base_n, int level )
   const int n = CalculateNForLevel( base_n, level );
   const int lo = ( n / 2 ) - base_n / 2;
   const int hi = ( n / 2 ) + base_n / 2 - 1;
-  const amrex::Box sparseBox( amrex::IntVect( lo, lo, lo ),
-                              amrex::IntVect( hi, hi, hi ) );
+  const amrex::Box sparseBox(  //
+    amrex::IntVect( lo, lo, lo ),
+    amrex::IntVect( hi, hi, hi ) );
   return amrex::BoxArray( sparseBox );
 }
 
@@ -334,21 +336,12 @@ void DefineFABs(  //
   pressure.setVal( 0.0 );  // Initialize all cells (including ghosts) to zero
 
   // Velocity components are face-centered
-  const auto Uba = amrex::convert( ba,
-                                   amrex::IntVect::TheDimensionVector( U ) );
-  const auto Vba = amrex::convert( ba,
-                                   amrex::IntVect::TheDimensionVector( V ) );
-  const auto Wba = amrex::convert( ba,
-                                   amrex::IntVect::TheDimensionVector( W ) );
-
-  velocity[U].define( Uba, dm, SingleComp, VelocityGhosts );
-  velocity[V].define( Vba, dm, SingleComp, VelocityGhosts );
-  velocity[W].define( Wba, dm, SingleComp, VelocityGhosts );
-
-  // Initialize velocity components to zero
-  for ( int d = 0; d < 3; ++d ) {
-    // Initialize all cells (including ghosts) to zero
-    velocity[d].setVal( 0.0 );
+  for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
+    const auto face_ba = amrex::convert(  //
+      ba,
+      amrex::IntVect::TheDimensionVector( idim ) );
+    velocity[idim].define( face_ba, dm, SingleComp, VelocityGhosts );
+    velocity[idim].setVal( 0.0 );
   }
 }
 
@@ -359,30 +352,25 @@ static void InitializeVelocity(  //
   int nLevels,
   int level )
 {
-  // Set all velocities to zero
-  for ( int d = 0; d < 3; ++d ) {
-    velocity[d].setVal( 0.0 );
-  }
-
   if ( level == nLevels - 1 ) {
     const int halfN = geom.Domain().length( 0 ) / 2;
-    const int i_face = halfN;
-    const int j_face = halfN;
-    const int k_face = halfN;
+    const int source_i = halfN;
+    const int source_j = halfN;
+    const int source_k = halfN;
 
     // Set a single nonzero x-face at the specified face indices
     for ( amrex::MFIter mfi( velocity[U] ); mfi.isValid(); ++mfi ) {
       const amrex::Box& box = mfi.validbox();
       const auto& u_arr = velocity[U].array( mfi );
-      if ( box.contains( i_face, j_face, k_face ) ) {
+      if ( box.contains( source_i, source_j, source_k ) ) {
         const amrex::Real dx = geom.CellSize( 0 );
-        u_arr( i_face, j_face, k_face ) = 1.0 / ( dx * dx );
+        u_arr( source_i, source_j, source_k ) = 1.0 / ( dx * dx );
       }
     }
 
     // Fill ghost cells
-    for ( int d = 0; d < 3; ++d ) {
-      velocity[d].FillBoundary( geom.periodicity() );
+    for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
+      velocity[idim].FillBoundary( geom.periodicity() );
     }
   }
 }
