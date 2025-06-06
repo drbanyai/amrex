@@ -103,6 +103,8 @@ static amrex::Real Phi(  //
   amrex::Real ri_y,
   amrex::Real ri_z,
   amrex::Real dx );
+static void PrintCorrectionStatistics(
+  const amrex::MultiFab& correction_solution );
 
 /*--------------------------------------------------------------------
   public free function definitions
@@ -765,10 +767,13 @@ void SingleLevelPressureSolve(  //
   BL_PROFILE( "SingleLevelPressureSolve" );
 
   // Allocate and compute divergence
-  amrex::MultiFab divergence( pressure.boxArray(),
-                              pressure.DistributionMap(),
-                              1,
-                              0 );
+  constexpr int ncomp = 1;
+  constexpr int nghost = 0;
+  amrex::MultiFab divergence(  //
+    pressure.boxArray(),
+    pressure.DistributionMap(),
+    ncomp,  // number of components
+    nghost );
   ComputeDivergence( divergence, velocity, geom );
 
   // Initialize pressure to zero
@@ -1038,13 +1043,14 @@ static void GaussSeidelIteration(  //
 
     const auto lo = amrex::lbound( box );
     const auto hi = amrex::ubound( box );
+    constexpr amrex::Real one_sixth = 1.0 / 6.0;
 
     for ( int i = lo.x; i <= hi.x; ++i ) {
       for ( int j = lo.y; j <= hi.y; ++j ) {
         for ( int k = lo.z; k <= hi.z; ++k ) {
           // Gauss-Seidel update with under-relaxation
-          const amrex::Real p_new =   //
-            ( 1.0 / 6.0 ) *           //
+          p_arr( i, j, k ) =          //
+            one_sixth *               //
             ( p_arr( i + 1, j, k ) +  //
               p_arr( i - 1, j, k ) +  //
               p_arr( i, j + 1, k ) +  //
@@ -1052,8 +1058,6 @@ static void GaussSeidelIteration(  //
               p_arr( i, j, k + 1 ) +  //
               p_arr( i, j, k - 1 ) -  //
               dx2 * div_arr( i, j, k ) );
-
-          p_arr( i, j, k ) = p_new;
         }
       }
     }
@@ -1072,7 +1076,7 @@ static amrex::Real ComputeResidual(  //
   const amrex::Real dx2 = dx * dx;
 
   amrex::Real residual = 0.0;
-  amrex::Real volume = 0.0;
+  int count = 0;
 
   for ( amrex::MFIter mfi( pressure ); mfi.isValid(); ++mfi ) {
     const amrex::Box& box = mfi.validbox();
@@ -1098,7 +1102,7 @@ static amrex::Real ComputeResidual(  //
 
           const amrex::Real res = lap_p - div_arr( i, j, k );
           residual += res * res;
-          volume += 1.0;
+          count++;
         }
       }
     }
@@ -1106,9 +1110,9 @@ static amrex::Real ComputeResidual(  //
 
   // Sum across processors
   amrex::ParallelDescriptor::ReduceRealSum( residual );
-  amrex::ParallelDescriptor::ReduceRealSum( volume );
+  amrex::ParallelDescriptor::ReduceIntSum( count );
 
-  return std::sqrt( residual / volume );
+  return std::sqrt( residual / count );
 }
 
 static void SolvePressureIterations(  //
@@ -1125,6 +1129,7 @@ static void SolvePressureIterations(  //
 
   amrex::Real residual = 1.0;
   int iteration = 0;
+  const int print_interval = std::max( 1, max_iterations / 10 );
 
   while ( residual > tolerance && iteration < max_iterations ) {
     GaussSeidelIteration(  //
@@ -1138,7 +1143,7 @@ static void SolvePressureIterations(  //
     residual = ComputeResidual( pressure, divergence, geom );
     iteration++;
 
-    if ( ( max_iterations < 100 ) || ( iteration % 10 == 0 ) ) {
+    if ( ( iteration % print_interval ) == 0 ) {
       amrex::Print()  //
         << "Iteration " << iteration << ", residual = " << residual << "\n";
     }
@@ -1228,6 +1233,7 @@ void FillPressureGhostCells(  //
   const amrex::IntVect ref_ratio( 2 );
 
   // Domain boundary conditions, per-component
+  // TODO: Do we even need external BCs?
   constexpr auto re = amrex::BCType::reflect_even;
   const amrex::BCRec bcrec( re, re, re, re, re, re );
   const amrex::Vector<amrex::BCRec> bcrecs{ bcrec };
@@ -1287,11 +1293,10 @@ void SolvePressureCorrection(  //
 
   // Calculate refinement ratio
   amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
-  AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] &&
-                       ratio[1] == ratio[2] );  // Uniform refinement
+  AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] && ratio[1] == ratio[2] );
 
-  const int ignoredFineLevel = -1;
   // Create a FluxRegister to handle flux mismatches
+  const int ignoredFineLevel = -1;
   amrex::FluxRegister flux_reg(  //
     fine_pressure.boxArray(),
     fine_pressure.DistributionMap(),
@@ -1300,16 +1305,17 @@ void SolvePressureCorrection(  //
     1 );
 
   // Create temporary MultiFabs to store fluxes
+  // TODO: Make these persistent?
   amrex::MultiFab crse_flux[AMREX_SPACEDIM];
   amrex::MultiFab fine_flux[AMREX_SPACEDIM];
   for ( int dir = 0; dir < AMREX_SPACEDIM; ++dir ) {
     // Create face-centered flux MultiFabs
-    amrex::BoxArray ba_crse =
-      amrex::convert( crse_pressure.boxArray(),
-                      amrex::IntVect::TheDimensionVector( dir ) );
-    amrex::BoxArray ba_fine =
-      amrex::convert( fine_pressure.boxArray(),
-                      amrex::IntVect::TheDimensionVector( dir ) );
+    amrex::BoxArray ba_crse = amrex::convert(  //
+      crse_pressure.boxArray(),
+      amrex::IntVect::TheDimensionVector( dir ) );
+    amrex::BoxArray ba_fine = amrex::convert(  //
+      fine_pressure.boxArray(),
+      amrex::IntVect::TheDimensionVector( dir ) );
     crse_flux[dir].define( ba_crse, crse_pressure.DistributionMap(), 1, 0 );
     fine_flux[dir].define( ba_fine, fine_pressure.DistributionMap(), 1, 0 );
   }
@@ -1328,6 +1334,7 @@ void SolvePressureCorrection(  //
 
       amrex::ParallelFor( bx, [=] AMREX_GPU_DEVICE( int i, int j, int k ) {
         // Compute flux using central differences
+        // TODO: Collapse this?
         if ( dir == 0 ) {
           flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
                                           pres_arr( i - 1, j, k ) );
@@ -1352,6 +1359,7 @@ void SolvePressureCorrection(  //
 
       amrex::ParallelFor( bx, [=] AMREX_GPU_DEVICE( int i, int j, int k ) {
         // Compute flux using central differences
+        // TODO: Collapse this?
         if ( dir == 0 ) {
           flux_arr( i, j, k ) = scale * ( pres_arr( i, j, k ) -
                                           pres_arr( i - 1, j, k ) );
@@ -1386,18 +1394,6 @@ void SolvePressureCorrection(  //
     0 );  // nghost
   correction_div.setVal( 0.0 );
 
-#if 0
-  // Initialize ghosts????? Should not be used.
-  correction_solution.ParallelCopy(  //
-    crse_pressure,                   // source
-    0,                               // source component
-    0,                               // dest component
-    1,                               // num comp
-    crse_pressure.nGrow(),           // source nghost
-    correction_solution.nGrow(),     // dest nghost
-    amrex::Periodicity::NonPeriodic() );
-#endif
-
   flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
 
   // Solve for the correction using the divergence as the right-hand side
@@ -1413,9 +1409,24 @@ void SolvePressureCorrection(  //
     nLevels );
 
   // Add correction to coarse pressure
-  amrex::MultiFab::Add( crse_pressure, correction_solution, 0, 0, 1, 0 );
+  constexpr int srccomp = 0;
+  constexpr int dstcomp = 0;
+  constexpr int numcomp = 1;
+  constexpr int nghost = 0;
+  amrex::MultiFab::Add(  //
+    crse_pressure,
+    correction_solution,
+    srccomp,
+    dstcomp,
+    numcomp,
+    nghost );
 
   // Print statistics about the correction
+  PrintCorrectionStatistics( correction_solution );
+}
+
+void PrintCorrectionStatistics( const amrex::MultiFab& correction_solution )
+{
   amrex::Real max_correction = 0.0;
   amrex::Real avg_correction = 0.0;
   amrex::Real volume = 0.0;
