@@ -42,30 +42,24 @@ void SingleLevelPressureSolve(  //
   int base_n,
   int nlevels );
 
-// Verification
+// Verification and comparison
+void CheckResults(  //
+  const amrex::MultiFab& pressure,
+  const amrex::Geometry& geom,
+  int base_n,
+  int nlevels );
+void CompareMultiFabs(  //
+  const LevelData& expected_level,
+  const std::vector<LevelData>& level_data );
+
+// Plotting
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const LevelData& fullFineSolution,
   int base_n,
   int nlevels );
 
-void CheckResults(  //
-  const amrex::MultiFab& pressure,
-  const amrex::Geometry& geom,
-  int base_n,
-  int nlevels );
-
-// Comparison utilities
-/**
- * @brief Compare a reference LevelData against a vector of LevelData at
- * different AMR levels
- * @param expected_level Reference LevelData to compare against
- * @param level_data Vector of LevelData at different AMR levels
- */
-void CompareMultiFabs(  //
-  const LevelData& expected_level,
-  const std::vector<LevelData>& level_data );
-
+// Dense or sparse/composite mesh defintion
 LevelData MakeDenseLevelData(  //
   amrex::Real domain_length,
   int base_n,
@@ -75,22 +69,6 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
   int nlevels,
   amrex::Real domain_length );
-
-// Fill ghost cells for pressure field between AMR levels
-void FillPressureGhostCells(  //
-  LevelData& fine_level,
-  const LevelData& crse_level );
-
-// Solve for pressure correction between AMR levels
-void SolvePressureCorrection(  //
-  amrex::MultiFab& crse_pressure,
-  const amrex::MultiFab& fine_pressure,
-  const amrex::Geometry& crse_geom,
-  const amrex::Geometry& fine_geom,
-  amrex::Real tolerance,
-  int max_iterations,
-  int base_n,
-  int nlevels );
 
 constexpr int CalculateFineN( int base_n, int nlevels );
 constexpr int CalculateNForLevel( int base_n, int level );

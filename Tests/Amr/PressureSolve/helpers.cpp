@@ -65,6 +65,9 @@ static void GaussSeidelIteration(  //
   int iteration,
   int base_n,
   int nLevels );
+static void FillPressureGhostCells(  //
+  LevelData& fine_level,
+  const LevelData& crse_level );
 static amrex::Real ComputeResidual(  //
   const amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
@@ -82,6 +85,15 @@ static void SolvePressureIterations(  //
   int max_iterations,
   int base_n,
   int nLevels );
+static void SolvePressureCorrection(  //
+  amrex::MultiFab& crse_pressure,
+  const amrex::MultiFab& fine_pressure,
+  const amrex::Geometry& crse_geom,
+  const amrex::Geometry& fine_geom,
+  amrex::Real tolerance,
+  int max_iterations,
+  int base_n,
+  int nlevels );
 static amrex::Real Phi(  //
   amrex::Real r_x,
   amrex::Real r_y,
@@ -844,6 +856,9 @@ void CheckResults(  //
   int base_n,
   int nLevels )
 {
+  amrex::Print()  //
+    << "Checking results for domain: " << geom.Domain()
+    << ", dx = " << geom.CellSize()[0] << "\n";
   amrex::Real max_error = 0.0;
   amrex::Real avg_error = 0.0;
   amrex::Real volume = 0.0;

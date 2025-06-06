@@ -58,14 +58,14 @@ int MyMain()
       << "\n";
   }
 
-  // Loop over levels: setup geometry, mesh, fields
+  // Create composite mesh
   std::vector<LevelData> composite_levels =  //
     MakeSparseCompositeLevels(               //
       baseN,
       nlevels,
       domain_length );
 
-  // Solve on the full composite mesh
+  // Solve on composite mesh
   CompositeSolve(  //
     composite_levels,
     tolerance,
@@ -73,12 +73,7 @@ int MyMain()
     baseN,
     nlevels );
 
-  amrex::Print() << "\nChecking results for all levels\n";
   for ( int lev = 0; lev < nlevels; ++lev ) {
-    amrex::Print()  //
-      << "\nLevel: " << lev
-      << ", domain: " << composite_levels[lev].geom.Domain()
-      << ", dx = " << composite_levels[lev].geom.CellSize()[0] << "\n";
     CheckResults(  //
       composite_levels[lev].pressure,
       composite_levels[lev].geom,
@@ -88,7 +83,7 @@ int MyMain()
 
   if ( dense ) {
     // First create and work with fine-level data
-    LevelData fine_level = MakeDenseLevelData(  //
+    LevelData dense_level = MakeDenseLevelData(  //
       domain_length,
       CalculateFineN( baseN, nlevels ),
       1,    // Only 1 level
@@ -96,25 +91,26 @@ int MyMain()
 
     // Work with fine-level data
     amrex::Print()  //
-      << "\nDense fine solution, domain: " << fine_level.geom.Domain()
-      << ", dx = " << fine_level.geom.CellSize()[0] << "\n";
+      << "\nDense fine solution, domain: " << dense_level.geom.Domain()
+      << ", dx = " << dense_level.geom.CellSize()[0] << "\n";
     SingleLevelPressureSolve(  //
-      fine_level.pressure,
-      fine_level.velocity,
-      fine_level.geom,
+      dense_level.pressure,
+      dense_level.velocity,
+      dense_level.geom,
       tolerance,
       max_iterations,
       baseN,
       nlevels );
-    CheckResults( fine_level.pressure, fine_level.geom, baseN, nlevels );
 
-    // Compare fine pressure with all levels
-    CompareMultiFabs( fine_level, composite_levels );
+    CheckResults( dense_level.pressure, dense_level.geom, baseN, nlevels );
 
-    // Sample and output results for all levels to a combined CSV file
+    // Compare dense results with sparse results
+    CompareMultiFabs( dense_level, composite_levels );
+
+    // Sample results and create plots
     SamplePressureAlongLine(  //
       composite_levels,
-      fine_level,
+      dense_level,
       baseN,
       nlevels );
   }
