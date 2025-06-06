@@ -36,6 +36,8 @@ static amrex::Geometry DefineGeometry(  //
 static amrex::BoxArray DefineBoxArray( int base_n, int level );
 static amrex::BoxArray DefineSparseBoxArray( int base_n, int level );
 static amrex::DistributionMapping DefineDM( const amrex::BoxArray& ba );
+static amrex::DistributionMapping DefineIOProcessorDM(
+  const amrex::BoxArray& ba );
 static void DefineFABs(  //
   amrex::MultiFab& pressure,
   std::array<amrex::MultiFab, 3>& velocity,
@@ -348,6 +350,14 @@ amrex::DistributionMapping DefineDM( const amrex::BoxArray& ba )
   return amrex::DistributionMapping( ba );
 }
 
+static amrex::DistributionMapping DefineIOProcessorDM(  //
+  const amrex::BoxArray& ba )
+{
+  return amrex::DistributionMapping( amrex::Vector<int>(  //
+    ba.size(),
+    amrex::ParallelDescriptor::IOProcessorNumber() ) );
+}
+
 void DefineFABs(  //
   amrex::MultiFab& pressure,
   std::array<amrex::MultiFab, 3>& velocity,
@@ -423,6 +433,16 @@ void SamplePressureAlongLine(  //
   int base_n,
   int nLevels )
 {
+  // Create a copy of fullFineSolution.pressure with all FABs on the IOProcessor
+  const amrex::BoxArray& fine_ba = fullFineSolution.pressure.boxArray();
+  const amrex::DistributionMapping fine_dm = DefineIOProcessorDM( fine_ba );
+  amrex::MultiFab full_fine_pressure(  //
+    fine_ba,
+    fine_dm,
+    fullFineSolution.pressure.nComp(),
+    fullFineSolution.pressure.nGrow() );
+  full_fine_pressure.ParallelCopy( fullFineSolution.pressure );
+
   const int finest_lev = static_cast<int>( level_data.size() ) - 1;
   const amrex::Geometry& fine_geom = level_data[finest_lev].geom;
 
@@ -476,14 +496,46 @@ void SamplePressureAlongLine(  //
 
   // Create MultiFabs to store interpolated pressure at each level
   amrex::Vector<amrex::MultiFab> interpolated_pressure( level_data.size() );
+  amrex::Vector<amrex::MultiFab> dense_level_pressure( level_data.size() );
   for ( int lev = 0; lev <= finest_lev; ++lev ) {
+    const amrex::BoxArray& fine_ba = full_fine_pressure.boxArray();
+    const amrex::DistributionMapping fine_dm = DefineIOProcessorDM( fine_ba );
+    const int ncomp = fullFineSolution.pressure.nComp();
+    const int nGrow = fullFineSolution.pressure.nGrow();
     // Define MultiFab with same structure as full fine pressure.
-    interpolated_pressure[lev].define(  //
-      fullFineSolution.pressure.boxArray(),
-      fullFineSolution.pressure.DistributionMap(),
-      fullFineSolution.pressure.nComp(),
-      fullFineSolution.pressure.nGrow() );
+    interpolated_pressure[lev].define( fine_ba, fine_dm, ncomp, nGrow );
     interpolated_pressure.at( lev ).setVal( 0.0 );
+
+    // Calculate refinement ratio between fine level and current level
+    const amrex::Box& fine_domain = level_data[finest_lev].geom.Domain();
+    const amrex::Box& current_domain = level_data[lev].geom.Domain();
+    const amrex::IntVect fine_size = fine_domain.size();
+    const amrex::IntVect current_size = current_domain.size();
+    // Ratio should be uniform in all dimensions
+    const int ratio = fine_size[0] / current_size[0];
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE( ratio == fine_size[1] / current_size[1] &&
+                                        ratio == fine_size[2] / current_size[2],
+                                      "Refinement ratio must be uniform in all "
+                                      "dimensions" );
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE( ratio >= 1,
+                                      "Fine level must be refined version of "
+                                      "current level" );
+    const amrex::BoxArray& dense_ba = amrex::coarsen( fine_ba, ratio );
+    // Use same IOProcessor DistributionMapping for dense level
+    const amrex::DistributionMapping dense_dm = DefineIOProcessorDM( dense_ba );
+    dense_level_pressure[lev].define( dense_ba, dense_dm, ncomp, nGrow );
+    dense_level_pressure.at( lev ).setVal( 0.0 );
+    dense_level_pressure.at( lev ).ParallelCopy( level_data[lev].pressure );
+
+    // Print some debug info
+    if ( amrex::ParallelDescriptor::IOProcessor() ) {
+      amrex::Print() << "\nLevel " << lev << " domain info (ratio = " << ratio
+                     << "):\n"
+                     << "  Original domain: " << current_domain << "\n"
+                     << "  Dense box array: " << dense_ba << "\n"
+                     << "  Original box array: "
+                     << level_data[lev].pressure.boxArray() << "\n";
+    }
   }
 
   // Set up boundary conditions for pressure
@@ -513,10 +565,21 @@ void SamplePressureAlongLine(  //
     for ( int thisLevel = 0; thisLevel <= lev; ++thisLevel ) {
       smf.emplace_back(  //
         amrex::Vector<amrex::MultiFab*>{
-          const_cast<amrex::MultiFab*>( &level_data[thisLevel].pressure ) } );
+          &dense_level_pressure.at( thisLevel ) } );
       st.emplace_back( amrex::Vector<amrex::Real>{ 0.0 } );
       geom.emplace_back( level_data[thisLevel].geom );
-      ratio.emplace_back( amrex::IntVect( 2, 2, 2 ) );
+
+      // Calculate the correct ratio between this level and the finest level
+      // For level L, ratio to finest level is 2^(finest_lev - L)
+      const int level_ratio = 1 << ( finest_lev - thisLevel );
+      ratio.emplace_back(
+        amrex::IntVect( level_ratio, level_ratio, level_ratio ) );
+
+      if ( amrex::ParallelDescriptor::IOProcessor() ) {
+        amrex::Print() << "\nFillPatchNLevels for level " << thisLevel
+                       << " using ratio " << level_ratio << " (2^"
+                       << ( finest_lev - thisLevel ) << ")\n";
+      }
     }
 
     auto& outMF = interpolated_pressure.at( lev );
@@ -598,6 +661,16 @@ void SamplePressureAlongLine(  //
           amrex::Print() << "No value found for level " << lev
                          << " at (i, j, k) = (" << i << ", " << j << ", " << k
                          << ")\n";
+          // Print more info about the point we're trying to sample
+          const amrex::Real x = fine_geom.CellCenter( i, 0 );
+          const amrex::Real y = fine_geom.CellCenter( j, 1 );
+          const amrex::Real z = fine_geom.CellCenter( k, 2 );
+          amrex::Print() << "  Physical coordinates: (" << x << "," << y << ","
+                         << z << ")\n";
+          amrex::Print() << "  Fine domain: " << fine_geom.Domain() << "\n";
+          amrex::Print() << "  Level " << lev
+                         << " domain: " << level_data[lev].geom.Domain()
+                         << "\n";
         }
         assert( found );
         outfile << "," << val;
@@ -606,11 +679,10 @@ void SamplePressureAlongLine(  //
       // Sample from full fine solution
       amrex::Real full_fine_val = 0.0;
       bool found = false;
-      for ( amrex::MFIter mfi( fullFineSolution.pressure ); mfi.isValid();
-            ++mfi ) {
+      for ( amrex::MFIter mfi( full_fine_pressure ); mfi.isValid(); ++mfi ) {
         const amrex::Box& box = mfi.validbox();
         if ( box.contains( amrex::IntVect( i, j, k ) ) ) {
-          const auto& parr = fullFineSolution.pressure.array( mfi );
+          const auto& parr = full_fine_pressure.array( mfi );
           full_fine_val = parr( i, j, k );
           found = true;
           break;
