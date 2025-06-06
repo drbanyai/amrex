@@ -94,6 +94,7 @@ static void SolvePressureCorrection(  //
   int max_iterations,
   int base_n,
   int nlevels );
+constexpr int CalculateNForLevel( int base_n, int level );
 static amrex::Real Phi(  //
   amrex::Real r_x,
   amrex::Real r_y,
@@ -102,58 +103,6 @@ static amrex::Real Phi(  //
   amrex::Real ri_y,
   amrex::Real ri_z,
   amrex::Real dx );
-
-// Average Phi over a target cube of size dx centered at (x,y,z)
-static amrex::Real AveragePhi(  //
-  amrex::Real x,
-  amrex::Real y,
-  amrex::Real z,
-  amrex::Real ri_x,
-  amrex::Real ri_y,
-  amrex::Real ri_z,
-  amrex::Real dx )
-{
-  // Check if target cube overlaps with source cube
-  const amrex::Real dr_x = x - ri_x;
-  const amrex::Real dr_y = y - ri_y;
-  const amrex::Real dr_z = z - ri_z;
-  const amrex::Real r2 = dr_x * dr_x + dr_y * dr_y + dr_z * dr_z;
-
-  // If target cube center is at the same cell center as source cube,
-  // use analytic solution
-  if ( r2 < 1.0e-8 ) {  // Effectively zero distance
-    // Analytic solution for self-potential at the center of the cube
-    return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
-  }
-
-  amrex::Real sum = 0.0;
-  const amrex::Real half_dx = 0.5 * dx;
-  constexpr amrex::Real sqrt3over5 = 0.7745966692414834;
-  // Use a 3x3x3 quadrature rule (27 points) for better accuracy
-  for ( int i = -1; i <= 1; i++ ) {
-    for ( int j = -1; j <= 1; j++ ) {
-      for ( int k = -1; k <= 1; k++ ) {
-        // √(3/5)
-        const amrex::Real x2 = x + i * half_dx * sqrt3over5;
-        const amrex::Real y2 = y + j * half_dx * sqrt3over5;
-        const amrex::Real z2 = z + k * half_dx * sqrt3over5;
-
-        // Use Gauss-Legendre weights
-        const amrex::Real w = ( i == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 ) *
-                              ( j == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 ) *
-                              ( k == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 );
-
-        sum += w * Phi( x2, y2, z2, ri_x, ri_y, ri_z, dx );
-      }
-    }
-  }
-
-  // The quadrature weights are normalized to sum to 8 (the volume of the cube)
-  return sum / 8.0;
-}
 
 /*--------------------------------------------------------------------
   public free function definitions
@@ -265,11 +214,11 @@ static amrex::Real ExpectedPressure(  //
   const amrex::Real centerPlus = ( ( fineN / 2.0 ) + 0.5 ) /
                                  fineN;  // Right source cube center
 
-  // Compute the potential from each source cube, averaged over the target cube
+  // Compute the contribution to the potential from each source cube
   const amrex::Real phi1 =
-    AveragePhi( x, y, z, centerMinus, centerPlus, centerPlus, dx );
+    Phi( x, y, z, centerMinus, centerPlus, centerPlus, dx );
   const amrex::Real phi2 =
-    AveragePhi( x, y, z, centerPlus, centerPlus, centerPlus, dx );
+    Phi( x, y, z, centerPlus, centerPlus, centerPlus, dx );
 
   // Sum the contributions from the two source cubes
   const amrex::Real p = -1.0 * phi1 + phi2;
@@ -1526,8 +1475,7 @@ constexpr int CalculateNForLevel( int base_n, int level )
 }
 
 // Compute the potential at r due to a uniform source cube of size dx centered
-// at ri This is (1/4π) * (1/dx³) * ∫∫∫_source_cube 1/|r-r'| dV' Note: r and ri
-// are always at cell centers
+// at ri This is (1/4π) * (1/dx³) * ∫∫∫_source_cube 1/|r-r'| dV'
 static amrex::Real Phi(  //
   amrex::Real r_x,
   amrex::Real r_y,
@@ -1537,58 +1485,19 @@ static amrex::Real Phi(  //
   amrex::Real ri_z,
   amrex::Real dx )
 {
-  constexpr bool point_wise = false;
-  {
-    // Compute distance from r to center of source cube
-    const amrex::Real dr_x = r_x - ri_x;
-    const amrex::Real dr_y = r_y - ri_y;
-    const amrex::Real dr_z = r_z - ri_z;
-    const amrex::Real r2 = dr_x * dr_x + dr_y * dr_y + dr_z * dr_z;
+  // Compute distance from r to center of source cube
+  const amrex::Real dr_x = r_x - ri_x;
+  const amrex::Real dr_y = r_y - ri_y;
+  const amrex::Real dr_z = r_z - ri_z;
+  const amrex::Real r2 = dr_x * dr_x + dr_y * dr_y + dr_z * dr_z;
 
-    // If r is at the same cell center as ri, use analytic solution
-    if ( r2 < 1.0e-8 ) {  // Effectively zero distance
-      // Analytic solution for self-potential at the center of the cube
-      return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
-    } else if ( point_wise ) {
-      return 1.0 / ( 4.0 * M_PI * std::sqrt( r2 ) );
-    }
+  // If r is at the same cell center as ri, use analytic solution
+  if ( r2 < ( dx / 2.0 ) * ( dx / 2.0 ) ) {  // Within the source cube
+    // Analytic solution for self-potential at the center of the cube
+    return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
+  } else {
+    return 1.0 / ( 4.0 * M_PI * std::sqrt( r2 ) );
   }
-
-  // For all other cell centers, use numerical integration
-  amrex::Real sum = 0.0;
-  const amrex::Real half_dx = 0.5 * dx;
-  constexpr amrex::Real sqrt3over5 = 0.7745966692414834;
-  // Use a 3x3x3 quadrature rule (27 points) for better accuracy
-  for ( int i = -1; i <= 1; i++ ) {
-    for ( int j = -1; j <= 1; j++ ) {
-      for ( int k = -1; k <= 1; k++ ) {
-        // √(3/5)
-        const amrex::Real x = ri_x + i * half_dx * sqrt3over5;
-        const amrex::Real y = ri_y + j * half_dx * sqrt3over5;
-        const amrex::Real z = ri_z + k * half_dx * sqrt3over5;
-
-        const amrex::Real dr_x = r_x - x;
-        const amrex::Real dr_y = r_y - y;
-        const amrex::Real dr_z = r_z - z;
-        const amrex::Real r = std::sqrt( dr_x * dr_x + dr_y * dr_y +
-                                         dr_z * dr_z );
-
-        // Use Gauss-Legendre weights
-        const amrex::Real w = ( i == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 ) *
-                              ( j == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 ) *
-                              ( k == 0 ? 0.8888888888888888
-                                       : 0.5555555555555556 );
-
-        sum += w / r;
-      }
-    }
-  }
-
-  // The quadrature weights are normalized to sum to 8 (the volume of the
-  // cube) So we just need to multiply by 1/4π
-  return ( 1.0 / ( 4.0 * M_PI ) ) * ( sum / 8.0 );
 }
 /*--------------------------------------------------------------------
   End of file

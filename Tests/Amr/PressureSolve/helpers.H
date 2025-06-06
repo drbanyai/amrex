@@ -71,7 +71,6 @@ std::vector<LevelData> MakeSparseCompositeLevels(  //
   amrex::Real domain_length );
 
 constexpr int CalculateFineN( int base_n, int nlevels );
-constexpr int CalculateNForLevel( int base_n, int level );
 
 /*--------------------------------------------------------------------
   End of file

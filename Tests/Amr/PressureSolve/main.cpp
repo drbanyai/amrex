@@ -33,8 +33,8 @@ int main( int argc, char** argv )
 int MyMain()
 {
   // Parse command line parameters
-  int nlevels = 2;
-  int baseN = 4;
+  int nlevels = 3;
+  int baseN = 8;
   bool dense = true;
   amrex::Real domain_length = 1.0;  // meters
   amrex::Real tolerance = 1.0e-8;
