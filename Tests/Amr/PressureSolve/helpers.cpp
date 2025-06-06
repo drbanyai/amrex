@@ -654,9 +654,30 @@ void SamplePressureAlongLine(  //
     script << " \\\n, '" << filename << "' using 1:" << ( finest_lev + 3 )
            << " title 'Dense' with linespoints linewidth 2 pointsize 2";
     script << "\n";
+
+    // Add absolute pressure plot with log scale
+    script << "set output 'pressure_profile_abs.png'\n";
+    script << "set ylabel '|Pressure| (Pa)'\n";
+    script << "set logscale y\n";
+    script << "set yrange [*:*]\n";
+    script << "plot";
+    script << " \\\n  '" << filename << "' using 1:(abs($" << ( finest_lev + 4 )
+           << ")) title '|Analytic|' with lines linetype -1 linewidth 3";
+    script << " \\\n, 'pressure_L0.csv' using 1:(abs($2)) title '|Raw Level 0|'"
+           << " with linespoints pointsize 2 linewidth 2";
+    for ( int lev = 0; lev <= finest_lev; ++lev ) {
+      script << " \\\n, '" << filename << "' using 1:(abs($" << ( lev + 2 )
+             << ")) title '|Level " << lev << "|'"
+             << " with linespoints linewidth 2 pointsize 2";
+    }
+    script << " \\\n, '" << filename << "' using 1:(abs($" << ( finest_lev + 3 )
+           << ")) title '|Dense|' with linespoints linewidth 2 pointsize 2";
+    script << "\n";
+
     script << "set output 'pressure_error_relative.png'\n";
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (unitless)'\n";
+    script << "unset logscale y\n";
     script << "set yrange [*:*]\n";
     script << "set yrange [-0.5:0.5]\n";  // DEBUG
     script << "plot";
@@ -681,8 +702,9 @@ void SamplePressureAlongLine(  //
     script << "\n";
     script << "set output 'pressure_error_abs.png'\n";
     script << "set xlabel 'x (m)'\n";
-    script << "set ylabel 'Pressure Error (Pa)'\n";
+    script << "set ylabel 'Pressure Error (Pa?)'\n";
     script << "set yrange [*:*]\n";
+    script << "set yrange [-0.12:0.12]\n";  // DEBUG
     script << "plot";
     // Error: full fine solution minus analytic
     script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
