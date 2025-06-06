@@ -130,6 +130,14 @@ void CompositeSolve(  //
     base_n,
     nLevels,
     0 );
+  for ( int lev = nLevels - 2; lev >= 0; --lev ) {
+    amrex::average_down(  //
+      composite_levels[lev + 1].pressure,
+      composite_levels[lev].pressure,
+      0,
+      1,
+      2 );
+  }
 }
 
 /*--------------------------------------------------------------------
@@ -441,12 +449,13 @@ void SamplePressureAlongLine(  //
         amrex::Print() << "No raw value found for level 0 at (i, j, k) = (" << i
                        << ", " << j0 << ", " << k0 << ")\n";
       }
-      const amrex::Real expected = ExpectedPressure( level0_geom,
-                                                     i,
-                                                     j0,
-                                                     k0,
-                                                     base_n,
-                                                     nLevels );
+      const amrex::Real expected = ExpectedPressure(  //
+        level0_geom,
+        i,
+        j0,
+        k0,
+        base_n,
+        nLevels );
       raw_outfile << x << "," << val << "," << expected << "\n";
     }
     raw_outfile.close();
@@ -471,14 +480,16 @@ void SamplePressureAlongLine(  //
     const amrex::IntVect current_size = current_domain.size();
     // Ratio should be uniform in all dimensions
     const int ratio = fine_size[0] / current_size[0];
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE( ratio == fine_size[1] / current_size[1] &&
-                                        ratio == fine_size[2] / current_size[2],
-                                      "Refinement ratio must be uniform in all "
-                                      "dimensions" );
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE( ratio >= 1,
-                                      "Fine level must be refined version of "
-                                      "current level" );
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(  //
+      ratio == fine_size[1] / current_size[1] &&
+        ratio == fine_size[2] / current_size[2],
+      "Refinement ratio must be uniform in all dimensions" );
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(  //
+      ratio >= 1,
+      "Fine level must be refined version of current level" );
     const amrex::BoxArray& dense_ba = amrex::coarsen( fine_ba, ratio );
+    amrex::Print() << "Fine box array: " << fine_ba << "\n";
+    amrex::Print() << "Dense box array: " << dense_ba << "\n";
     // Use same IOProcessor DistributionMapping for dense level
     const amrex::DistributionMapping dense_dm = DefineIOProcessorDM( dense_ba );
     dense_level_pressure[lev].define( dense_ba, dense_dm, ncomp, nGrow );
@@ -487,12 +498,13 @@ void SamplePressureAlongLine(  //
 
     // Print some debug info
     if ( amrex::ParallelDescriptor::IOProcessor() ) {
-      amrex::Print() << "\nLevel " << lev << " domain info (ratio = " << ratio
-                     << "):\n"
-                     << "  Original domain: " << current_domain << "\n"
-                     << "  Dense box array: " << dense_ba << "\n"
-                     << "  Original box array: "
-                     << level_data[lev].pressure.boxArray() << "\n";
+      amrex::Print()          //
+        << "\nLevel " << lev  //
+        << " domain info (ratio = " << ratio << "):\n"
+        << "  Original domain: " << current_domain << "\n"
+        << "  Dense box array: " << dense_ba << "\n"
+        << "  Sparse box array: " << level_data[lev].pressure.boxArray()
+        << "\n";
     }
   }
 
@@ -503,77 +515,63 @@ void SamplePressureAlongLine(  //
     bcs.at( 0 ).setHi( idim, amrex::BCType::ext_dir );
   }
 
-  // Fill all levels with proper interpolation
-  for ( int lev = 0; lev <= finest_lev; ++lev ) {
-    // Create boundary condition functors for each level
-    amrex::Vector<amrex::PhysBCFunct<PressureBndryFunc>> physbcs;
-    for ( int thisLevel = 0; thisLevel <= lev; ++thisLevel ) {
-      physbcs.emplace_back(  //
-        level_data[thisLevel].geom,
-        bcs,
-        PressureBndryFunc( base_n, nLevels ) );
-    }
+  // For each level, do a single interpolation from dense data to fine grid
+  for ( int lev = 0; lev < finest_lev; ++lev ) {
+    // Calculate refinement ratio between this level and finest level
+    const int level_ratio = 1 << ( finest_lev - lev );
+    const amrex::IntVect ref_ratio( level_ratio, level_ratio, level_ratio );
 
-    // Prepare data for FillPatchNLevels
-    amrex::Vector<amrex::Vector<amrex::MultiFab*>> smf;
-    amrex::Vector<amrex::Vector<amrex::Real>> st;
-    amrex::Vector<amrex::Geometry> geom;
-    amrex::Vector<amrex::IntVect> ratio;
-
-    for ( int thisLevel = 0; thisLevel <= lev; ++thisLevel ) {
-      smf.emplace_back(  //
-        amrex::Vector<amrex::MultiFab*>{
-          &dense_level_pressure.at( thisLevel ) } );
-      st.emplace_back( amrex::Vector<amrex::Real>{ 0.0 } );
-      geom.emplace_back( level_data[thisLevel].geom );
-
-      // Calculate the correct ratio between this level and the finest level
-      // For level L, ratio to finest level is 2^(finest_lev - L)
-      const int level_ratio = 1 << ( finest_lev - thisLevel );
-      ratio.emplace_back(
-        amrex::IntVect( level_ratio, level_ratio, level_ratio ) );
-
-      if ( amrex::ParallelDescriptor::IOProcessor() ) {
-        amrex::Print() << "\nFillPatchNLevels for level " << thisLevel
-                       << " using ratio " << level_ratio << " (2^"
-                       << ( finest_lev - thisLevel ) << ")\n";
-      }
-    }
-
-    auto& outMF = interpolated_pressure.at( lev );
-    constexpr amrex::Real time = 0.0;
-    constexpr int scomp = 0;
-    constexpr int dcomp = 0;
-    constexpr int ncomp = 1;
-    constexpr int bccomp = 0;
-    constexpr int bcrcomp = 0;
+    // Create boundary conditions
     amrex::Vector<amrex::BCRec> bcr( 1 );
     for ( int idim = 0; idim < AMREX_SPACEDIM; ++idim ) {
       bcr[0].setLo( idim, amrex::BCType::ext_dir );
       bcr[0].setHi( idim, amrex::BCType::ext_dir );
     }
-    amrex::FillPatchNLevels(  //
-      outMF,
-      lev,                  // level
-      amrex::IntVect( 0 ),  // outMF.nGrowVect(),  // nghost // No difference
-      time,                 // time
-      smf,                  // source MultiFabs
-      st,                   // source times
-      scomp,                // source component
-      dcomp,                // destination component
-      ncomp,                // number of components
-      geom,                 // geometries
-      physbcs,              // boundary conditions
-      bccomp,               // boundary condition component
-      ratio,                // refinement ratios
+
+    // Create boundary condition functors for both coarse and fine levels
+    PressureBndryFunc pbf( base_n, nLevels );
+    amrex::PhysBCFunct<PressureBndryFunc> crse_physbc( level_data[lev].geom,
+                                                       bcr,
+                                                       pbf );
+    amrex::PhysBCFunct<PressureBndryFunc> fine_physbc( fine_geom, bcr, pbf );
+
+    // Do a single interpolation from coarse to fine
+    amrex::InterpFromCoarseLevel(  //
+      interpolated_pressure[lev],  // fine MultiFab
+      amrex::IntVect( 0 ),         // nghost
+      0.0,                         // time
+      dense_level_pressure[lev],   // coarse MultiFab
+      0,                           // scomp
+      0,                           // dcomp
+      1,                           // ncomp
+      level_data[lev].geom,        // coarse geometry
+      fine_geom,                   // fine geometry
+      crse_physbc,                 // coarse boundary conditions
+      0,                           // cbccomp
+      fine_physbc,                 // fine boundary conditions
+      0,                           // fbccomp
+      ref_ratio,                   // refinement ratio
       // Interpolator makes a significant difference here
-      // &amrex::pc_interp,
+      &amrex::pc_interp,
       // &amrex::cell_bilinear_interp,
-      &amrex::quadratic_interp,
+      // &amrex::quadratic_interp,
       // &amrex::cell_quartic_interp,
-      bcr,        // boundary conditions
-      bcrcomp );  // boundary condition component
+      bcr,  // boundary conditions
+      0     // bcrcomp
+    );
+
+    if ( amrex::ParallelDescriptor::IOProcessor() ) {
+      amrex::Print()                       //
+        << "\nInterpolated level " << lev  //
+        << " using ratio " << level_ratio  //
+        << " (2^" << ( finest_lev - lev )  //
+        << ")\n";
+    }
   }
+
+  // For the finest level, just copy the data directly
+  interpolated_pressure[finest_lev].ParallelCopy(
+    dense_level_pressure[finest_lev] );
 
   // Only rank 0 process should write output files
   if ( amrex::ParallelDescriptor::IOProcessor() ) {
@@ -670,19 +668,21 @@ void SamplePressureAlongLine(  //
     script << "set ylabel 'Pressure (Pa)'\n";
     script << "set xzeroaxis\n";
     script << "set datafile separator ','\n";
-    script << "set yrange [-1.5:1.5]\n";  // DEBUG
+    //     script << "set yrange [-1.5:1.5]\n";  // DEBUG
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
-    script << " \\\n, '" << filename0 << "' using 1:2 title 'Raw Level 0'"
-           << " with linespoints pointsize 2 linewidth 2";
-    for ( int lev = 0; lev <= finest_lev; ++lev ) {
-      script << " \\\n, '" << filename << "' using 1:" << ( lev + 2 )
-             << " title 'Level " << lev << "'"
-             << " with linespoints linewidth 2 pointsize 2";
-    }
     script << " \\\n, '" << filename << "' using 1:" << ( finest_lev + 3 )
            << " title 'Dense' with linespoints linewidth 2 pointsize 2";
+    if ( finest_lev > 0 ) {
+      // script << " \\\n, '" << filename0 << "' using 1:2 title 'Raw Level 0'"
+      //        << " with linespoints pointsize 2 linewidth 2";
+      for ( int lev = 0; lev <= finest_lev; ++lev ) {
+        script << " \\\n, '" << filename << "' using 1:" << ( lev + 2 )
+               << " title 'Level " << lev << "'"
+               << " with linespoints linewidth 2 pointsize 2";
+      }
+    }
     script << "\n";
 
     // Add absolute pressure plot with log scale
@@ -693,16 +693,18 @@ void SamplePressureAlongLine(  //
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:(abs($" << ( finest_lev + 4 )
            << ")) title '|Analytic|' with lines linetype -1 linewidth 3";
-    script << " \\\n, '" << filename0
-           << "' using 1:(abs($2)) title '|Raw Level 0|'"
-           << " with linespoints pointsize 2 linewidth 2";
-    for ( int lev = 0; lev <= finest_lev; ++lev ) {
-      script << " \\\n, '" << filename << "' using 1:(abs($" << ( lev + 2 )
-             << ")) title '|Level " << lev << "|'"
-             << " with linespoints linewidth 2 pointsize 2";
-    }
+    // script << " \\\n, '" << filename0
+    //        << "' using 1:(abs($2)) title '|Raw Level 0|'"
+    //        << " with linespoints pointsize 2 linewidth 2";
     script << " \\\n, '" << filename << "' using 1:(abs($" << ( finest_lev + 3 )
            << ")) title '|Dense|' with linespoints linewidth 2 pointsize 2";
+    if ( finest_lev > 0 ) {
+      for ( int lev = 0; lev <= finest_lev; ++lev ) {
+        script << " \\\n, '" << filename << "' using 1:(abs($" << ( lev + 2 )
+               << ")) title '|Level " << lev << "|'"
+               << " with linespoints linewidth 2 pointsize 2";
+      }
+    }
     script << "\n";
 
     script << "set output 'pressure_error_relative.png'\n";
@@ -710,24 +712,28 @@ void SamplePressureAlongLine(  //
     script << "set ylabel 'Pressure Error (unitless)'\n";
     script << "unset logscale y\n";
     script << "set yrange [*:*]\n";
-    script << "set yrange [-0.5:0.5]\n";  // DEBUG
+    // script << "set yrange [-0.5:0.5]\n";  // DEBUG
     script << "plot";
     // Error: full fine solution minus analytic
     script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
            << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
            << ")) title '(Dense - Analytic)/abs(Analytic)' with linespoints";
-    // Error: finest level minus analytic
-    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
-           << ")) title '(Fine - Analytic)/abs(Analytic)' with linespoints";
-    // Error: finest level minus full fine
-    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
-           << ")) title '(Fine - Dense)/abs(Dense)' with linespoints";
-    // Error: raw level 0 minus analytic
-    script << " \\\n, '" << filename0 << "' using 1:(($2-$3)/abs($3))"
-           << " title '(Raw L0 - Analytic)/abs(Analytic)' with linespoints "
-              "pointsize 2";
+    if ( finest_lev > 0 ) {
+      // Error: finest level minus analytic
+      script
+        << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+        << "-$" << ( finest_lev + 4 ) << ")/abs($" << ( finest_lev + 4 )
+        << ")) title '(Composite - Analytic)/abs(Analytic)' with linespoints";
+      // Error: finest level minus full fine
+      script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+             << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
+             << ")) title '(Composite - Dense)/abs(Dense)' with linespoints";
+      // Error: raw level 0 minus analytic
+      // script << " \\\n, '" << filename0 << "' using 1:(($2-$3)/abs($3))"
+      //        << " title '(Raw L0 - Analytic)/abs(Analytic)' with linespoints
+      //        "
+      //           "pointsize 2";
+    }
     script << " \\\n,  0.05 title '+/- 5%' lt 0";
     script << " \\\n, -0.05 title '' lt 0";
     script << "\n";
@@ -735,23 +741,25 @@ void SamplePressureAlongLine(  //
     script << "set xlabel 'x (m)'\n";
     script << "set ylabel 'Pressure Error (Pa?)'\n";
     script << "set yrange [*:*]\n";
-    script << "set yrange [-0.12:0.12]\n";  // DEBUG
+    script << "#set yrange [-0.15:0.15]\n";  // DEBUG
     script << "plot";
     // Error: full fine solution minus analytic
     script << " \\\n  '" << filename << "' using 1:(($" << ( finest_lev + 3 )
            << "-$" << ( finest_lev + 4 )
            << ")) title 'Dense - Analytic' with linespoints";
-    // Error: finest level minus analytic
-    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 4 )
-           << ")) title 'Fine - Analytic' with linespoints";
-    // Error: finest level minus full fine
-    script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
-           << "-$" << ( finest_lev + 3 )
-           << ")) title 'Fine - Dense' with linespoints";
-    // Error: raw level 0 minus analytic
-    script << " \\\n, 'pressure_L0.csv' using 1:($2-$3)"
-           << " title 'Raw L0 - Analytic' with linespoints pointsize 2";
+    if ( finest_lev > 0 ) {
+      // Error: finest level minus analytic
+      script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+             << "-$" << ( finest_lev + 4 )
+             << ")) title 'Composite - Analytic' with linespoints";
+      // Error: finest level minus full fine
+      script << " \\\n, '" << filename << "' using 1:(($" << ( finest_lev + 2 )
+             << "-$" << ( finest_lev + 3 )
+             << ")) title 'Composite - Dense' with linespoints";
+      // Error: raw level 0 minus analytic
+      // script << " \\\n, 'pressure_L0.csv' using 1:($2-$3)"
+      //        << " title 'Raw L0 - Analytic' with linespoints pointsize 2";
+    }
     script << "\n";
     script.close();
 
