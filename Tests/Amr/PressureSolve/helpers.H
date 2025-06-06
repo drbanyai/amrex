@@ -43,17 +43,8 @@ void SingleLevelPressureSolve(  //
   int nlevels );
 
 // Verification
-// Multi-level sampling and CSV output
-/**
- * @brief Sample pressure along the center line at the finest resolution,
- * interpolating all levels to the fine grid, and write a CSV with columns for
- * each level.
- * @param level_data Vector of LevelData objects (coarse to fine)
- * @param filename Output CSV filename
- */
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
-  const std::string& filename,
   const LevelData& fullFineSolution,
   int base_n,
   int nlevels );

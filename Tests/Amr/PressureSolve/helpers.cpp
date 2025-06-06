@@ -428,11 +428,13 @@ static void InitializeVelocity(  //
 
 void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
-  const std::string& filename,
   const LevelData& fullFineSolution,
   int base_n,
   int nLevels )
 {
+  const std::string filename = "pressure.csv";
+  const std::string filename0 = "pressure_L0.csv";
+
   // Create a copy of fullFineSolution.pressure with all FABs on the IOProcessor
   const amrex::BoxArray& fine_ba = fullFineSolution.pressure.boxArray();
   const amrex::DistributionMapping fine_dm = DefineIOProcessorDM( fine_ba );
@@ -454,7 +456,7 @@ void SamplePressureAlongLine(  //
 
   // Write raw level 0 pressure values to CSV for debugging
   if ( amrex::ParallelDescriptor::IOProcessor() ) {
-    std::ofstream raw_outfile( "pressure_L0.csv" );
+    std::ofstream raw_outfile( filename0 );
     raw_outfile << "x,raw_pressure_L0,analytic\n";
 
     const amrex::Geometry& level0_geom = level_data[0].geom;
@@ -716,7 +718,7 @@ void SamplePressureAlongLine(  //
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:" << ( finest_lev + 4 )
            << " title 'Analytic' with lines linetype -1 linewidth 3";
-    script << " \\\n, 'pressure_L0.csv' using 1:2 title 'Raw Level 0'"
+    script << " \\\n, '" << filename0 << "' using 1:2 title 'Raw Level 0'"
            << " with linespoints pointsize 2 linewidth 2";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
       script << " \\\n, '" << filename << "' using 1:" << ( lev + 2 )
@@ -735,7 +737,8 @@ void SamplePressureAlongLine(  //
     script << "plot";
     script << " \\\n  '" << filename << "' using 1:(abs($" << ( finest_lev + 4 )
            << ")) title '|Analytic|' with lines linetype -1 linewidth 3";
-    script << " \\\n, 'pressure_L0.csv' using 1:(abs($2)) title '|Raw Level 0|'"
+    script << " \\\n, '" << filename0
+           << "' using 1:(abs($2)) title '|Raw Level 0|'"
            << " with linespoints pointsize 2 linewidth 2";
     for ( int lev = 0; lev <= finest_lev; ++lev ) {
       script << " \\\n, '" << filename << "' using 1:(abs($" << ( lev + 2 )
@@ -766,7 +769,7 @@ void SamplePressureAlongLine(  //
            << "-$" << ( finest_lev + 3 ) << ")/abs($" << ( finest_lev + 3 )
            << ")) title '(Fine - Dense)/abs(Dense)' with linespoints";
     // Error: raw level 0 minus analytic
-    script << " \\\n, 'pressure_L0.csv' using 1:(($2-$3)/abs($3))"
+    script << " \\\n, '" << filename0 << "' using 1:(($2-$3)/abs($3))"
            << " title '(Raw L0 - Analytic)/abs(Analytic)' with linespoints "
               "pointsize 2";
     script << " \\\n,  0.05 title '+/- 5%' lt 0";

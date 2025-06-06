@@ -35,31 +35,43 @@ int MyMain()
   // Parse command line parameters
   int nlevels = 2;
   int baseN = 4;
-  bool dense = false;
+  bool dense = true;
+  amrex::Real domain_length = 1.0;  // meters
+  amrex::Real tolerance = 1.0e-8;
+  int max_iterations = 500;
   {
     amrex::ParmParse pp;
     pp.query( "n_levels", nlevels );
     pp.query( "base_n", baseN );
     pp.query( "dense", dense );
-    amrex::Print()               //
-      << "nlevels: " << nlevels  //
-      << ", baseN: " << baseN    //
-      << ", dense: " << dense    //
+    pp.query( "domain_length", domain_length );
+    pp.query( "tolerance", tolerance );
+    pp.query( "max_iterations", max_iterations );
+    amrex::Print()                                 //
+      << "Equivalent command line parameters:\n "  //
+      << " nlevels=" << nlevels                    //
+      << " baseN=" << baseN                        //
+      << " dense=" << dense                        //
+      << " domain_length=" << domain_length        //
+      << " tolerance=" << tolerance                //
+      << " max_iterations=" << max_iterations      //
       << "\n";
   }
 
-  constexpr amrex::Real domain_length = 1.0;  // meters
-  constexpr amrex::Real tolerance = 1.0e-8;
-  constexpr int max_iterations = 500;
-
   // Loop over levels: setup geometry, mesh, fields
-  std::vector<LevelData> composite_levels = MakeSparseCompositeLevels(  //
-    baseN,
-    nlevels,
-    domain_length );
+  std::vector<LevelData> composite_levels =  //
+    MakeSparseCompositeLevels(               //
+      baseN,
+      nlevels,
+      domain_length );
 
   // Solve on the full composite mesh
-  CompositeSolve( composite_levels, tolerance, max_iterations, baseN, nlevels );
+  CompositeSolve(  //
+    composite_levels,
+    tolerance,
+    max_iterations,
+    baseN,
+    nlevels );
 
   amrex::Print() << "\nChecking results for all levels\n";
   for ( int lev = 0; lev < nlevels; ++lev ) {
@@ -79,16 +91,13 @@ int MyMain()
     LevelData fine_level = MakeDenseLevelData(  //
       domain_length,
       CalculateFineN( baseN, nlevels ),
-      1,    // 1 level
-      0 );  // level zero
+      1,    // Only 1 level
+      0 );  // This is level zero
 
     // Work with fine-level data
     amrex::Print()  //
-      << "\nComplete fine solution, domain: " << fine_level.geom.Domain()
+      << "\nDense fine solution, domain: " << fine_level.geom.Domain()
       << ", dx = " << fine_level.geom.CellSize()[0] << "\n";
-    amrex::Print()                     //
-      << "  Tolerance: " << tolerance  //
-      << ", Max iterations: " << max_iterations << "\n";
     SingleLevelPressureSolve(  //
       fine_level.pressure,
       fine_level.velocity,
@@ -105,7 +114,6 @@ int MyMain()
     // Sample and output results for all levels to a combined CSV file
     SamplePressureAlongLine(  //
       composite_levels,
-      "pressure.csv",
       fine_level,
       baseN,
       nlevels );
