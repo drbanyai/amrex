@@ -85,6 +85,11 @@ static void SolvePressureIterations(  //
   int max_iterations,
   int base_n,
   int nLevels );
+static amrex::MultiFab ComputeFluxCorrection(  //
+  const amrex::MultiFab& crse_pressure,
+  const amrex::MultiFab& fine_pressure,
+  const amrex::Geometry& crse_geom,
+  const amrex::Geometry& fine_geom );
 static void SolvePressureCorrection(  //
   amrex::MultiFab& crse_pressure,
   const amrex::MultiFab& fine_pressure,
@@ -1279,20 +1284,17 @@ void FillPressureGhostCells(  //
     bcscomp );
 }
 
-void SolvePressureCorrection(  //
-  amrex::MultiFab& crse_pressure,
+amrex::MultiFab ComputeFluxCorrection(  //
+  const amrex::MultiFab& crse_pressure,
   const amrex::MultiFab& fine_pressure,
   const amrex::Geometry& crse_geom,
-  const amrex::Geometry& fine_geom,
-  amrex::Real tolerance,
-  int max_iterations,
-  int base_n,
-  int nLevels )
+  const amrex::Geometry& fine_geom )
 {
-  BL_PROFILE( "SolvePressureCorrection" );
+  BL_PROFILE( "ComputeFluxCorrection" );
 
   // Calculate refinement ratio
-  amrex::IntVect ratio = fine_geom.Domain().size() / crse_geom.Domain().size();
+  const amrex::IntVect ratio =  //
+    fine_geom.Domain().size() / crse_geom.Domain().size();
   AMREX_ALWAYS_ASSERT( ratio[0] == ratio[1] && ratio[1] == ratio[2] );
 
   // Create a FluxRegister to handle flux mismatches
@@ -1380,13 +1382,7 @@ void SolvePressureCorrection(  //
     flux_reg.FineAdd( fine_flux[dir], dir, 0, 0, 1, 1.0 );
   }
 
-  // Create correction MultiFab and divergence MultiFab
-  amrex::MultiFab correction_solution(  //
-    crse_pressure.boxArray(),
-    crse_pressure.DistributionMap(),
-    1,    // ncomp
-    1 );  // nghost
-  correction_solution.setVal( 0.0 );
+  // Create divergence MultiFab
   amrex::MultiFab correction_div(  //
     crse_pressure.boxArray(),
     crse_pressure.DistributionMap(),
@@ -1395,6 +1391,33 @@ void SolvePressureCorrection(  //
   correction_div.setVal( 0.0 );
 
   flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
+  return correction_div;
+}
+
+void SolvePressureCorrection(  //
+  amrex::MultiFab& crse_pressure,
+  const amrex::MultiFab& fine_pressure,
+  const amrex::Geometry& crse_geom,
+  const amrex::Geometry& fine_geom,
+  amrex::Real tolerance,
+  int max_iterations,
+  int base_n,
+  int nLevels )
+{
+  BL_PROFILE( "SolvePressureCorrection" );
+
+  const amrex::MultiFab correction_div = ComputeFluxCorrection(  //
+    crse_pressure,
+    fine_pressure,
+    crse_geom,
+    fine_geom );
+
+  amrex::MultiFab correction_solution(  //
+    crse_pressure.boxArray(),
+    crse_pressure.DistributionMap(),
+    1,    // ncomp
+    1 );  // nghost
+  correction_solution.setVal( 0.0 );
 
   // Solve for the correction using the divergence as the right-hand side
   constexpr bool use_expected_BCs = false;
