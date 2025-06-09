@@ -49,8 +49,8 @@ int MyMain()
     pp.query( "max_iterations", max_iterations );
     amrex::Print()                                 //
       << "Equivalent command line parameters:\n "  //
-      << " nlevels=" << nlevels                    //
-      << " baseN=" << baseN                        //
+      << " n_levels=" << nlevels                   //
+      << " base_n=" << baseN                       //
       << " dense=" << dense                        //
       << " domain_length=" << domain_length        //
       << " tolerance=" << tolerance                //
