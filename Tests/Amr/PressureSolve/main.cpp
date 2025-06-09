@@ -13,6 +13,7 @@
   non-standard includes
   --------------------------------------------------------------------*/
 #include "helpers.H"
+#include "stencil.H"
 
 /*--------------------------------------------------------------------
   forward declarations
@@ -39,14 +40,32 @@ int MyMain()
   amrex::Real domain_length = 1.0;  // meters
   amrex::Real tolerance = 1.0e-8;
   int max_iterations = 500;
+  // PressureSolve::StencilType stencil_type =
+  //   PressureSolve::StencilType::Standard5Point;
+  PressureSolve::StencilType stencil_type =
+    PressureSolve::StencilType::HOC9Point;
   {
     amrex::ParmParse pp;
+    // std::string stencil_type_str = "standard5point";  /// DEBUG
+    std::string stencil_type_str = "hoc9point";  /// DEBUG
     pp.query( "n_levels", nlevels );
     pp.query( "base_n", baseN );
     pp.query( "dense", dense );
     pp.query( "domain_length", domain_length );
     pp.query( "tolerance", tolerance );
     pp.query( "max_iterations", max_iterations );
+    pp.query( "stencil_type", stencil_type_str );
+
+    // Convert stencil type string to enum
+    if ( stencil_type_str == "standard5point" ) {
+      stencil_type = PressureSolve::StencilType::Standard5Point;
+    } else if ( stencil_type_str == "hoc9point" ) {
+      stencil_type = PressureSolve::StencilType::HOC9Point;
+    } else {
+      amrex::Abort(
+        "Unknown stencil type. Valid options are: standard5point, hoc9point" );
+    }
+
     amrex::Print()                                 //
       << "Equivalent command line parameters:\n "  //
       << " n_levels=" << nlevels                   //
@@ -55,6 +74,7 @@ int MyMain()
       << " domain_length=" << domain_length        //
       << " tolerance=" << tolerance                //
       << " max_iterations=" << max_iterations      //
+      << " stencil_type=" << stencil_type_str      //
       << "\n";
   }
 
@@ -71,7 +91,8 @@ int MyMain()
     tolerance,
     max_iterations,
     baseN,
-    nlevels );
+    nlevels,
+    stencil_type );
 
   for ( int lev = 0; lev < nlevels; ++lev ) {
     CheckResults(  //
@@ -100,7 +121,8 @@ int MyMain()
       tolerance,
       max_iterations,
       baseN,
-      nlevels );
+      nlevels,
+      stencil_type );
 
     CheckResults( dense_level.pressure, dense_level.geom, baseN, nlevels );
 

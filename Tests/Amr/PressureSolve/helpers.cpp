@@ -2,6 +2,7 @@
   associated include
   --------------------------------------------------------------------*/
 #include "helpers.H"
+#include "stencil.H"
 
 /*--------------------------------------------------------------------
   standard includes
@@ -49,7 +50,8 @@ static void RecursiveCompositeSolve(  //
   int max_iterations,
   int base_n,
   int nLevels,
-  int level );
+  int level,
+  PressureSolve::StencilType stencil_type );
 static amrex::Real ExpectedPressure(  //
   const amrex::Geometry& geom,
   int i,
@@ -64,14 +66,16 @@ static void GaussSeidelIteration(  //
   const amrex::Geometry& geom,
   int iteration,
   int base_n,
-  int nLevels );
+  int nLevels,
+  const PressureSolve::StencilBase& stencil );
 static void FillPressureGhostCells(  //
   LevelData& fine_level,
   const LevelData& crse_level );
 static amrex::Real ComputeResidual(  //
   const amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
-  const amrex::Geometry& geom );
+  const amrex::Geometry& geom,
+  const PressureSolve::StencilBase& stencil );
 static void ComputeDivergence(  //
   amrex::MultiFab& divergence,
   const std::array<amrex::MultiFab, 3>& velocity,
@@ -84,12 +88,14 @@ static void SolvePressureIterations(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nLevels );
+  int nLevels,
+  const PressureSolve::StencilBase& stencil );
 static amrex::MultiFab ComputeFluxCorrection(  //
   const amrex::MultiFab& crse_pressure,
   const amrex::MultiFab& fine_pressure,
   const amrex::Geometry& crse_geom,
-  const amrex::Geometry& fine_geom );
+  const amrex::Geometry& fine_geom,
+  PressureSolve::StencilType stencil_type );
 static void SolvePressureCorrection(  //
   amrex::MultiFab& crse_pressure,
   const amrex::MultiFab& fine_pressure,
@@ -98,7 +104,8 @@ static void SolvePressureCorrection(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nlevels );
+  int nlevels,
+  PressureSolve::StencilType stencil_type );
 constexpr int CalculateNForLevel( int base_n, int level );
 static amrex::Real Phi(  //
   amrex::Real r_x,
@@ -119,7 +126,8 @@ void CompositeSolve(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nLevels )
+  int nLevels,
+  PressureSolve::StencilType stencil_type )
 {
   BL_PROFILE( "CompositeSolve" );
 
@@ -129,7 +137,8 @@ void CompositeSolve(  //
     max_iterations,
     base_n,
     nLevels,
-    0 );
+    0,
+    stencil_type );
   for ( int lev = nLevels - 2; lev >= 0; --lev ) {
     amrex::average_down(  //
       composite_levels[lev + 1].pressure,
@@ -149,7 +158,8 @@ void RecursiveCompositeSolve(  //
   int max_iterations,
   int base_n,
   int nLevels,
-  int level )
+  int level,
+  PressureSolve::StencilType stencil_type )
 {
   BL_PROFILE( "RecursiveCompositeSolve" );
   amrex::Print()  //
@@ -175,7 +185,8 @@ void RecursiveCompositeSolve(  //
     tolerance,
     max_iterations,
     base_n,
-    nLevels );
+    nLevels,
+    stencil_type );
 
   if ( level < nLevels - 1 ) {
     // Composite solve on N+1 and above
@@ -185,7 +196,8 @@ void RecursiveCompositeSolve(  //
       max_iterations,
       base_n,
       nLevels,
-      level + 1 );
+      level + 1,
+      stencil_type );
 
     // Correction solve on N using N+1/N flux mismatch
     SolvePressureCorrection(  //
@@ -196,7 +208,8 @@ void RecursiveCompositeSolve(  //
       tolerance,
       max_iterations,
       base_n,
-      nLevels );
+      nLevels,
+      stencil_type );
 
     // Composite solve on N+1 and above, using corrected N
     RecursiveCompositeSolve(  //
@@ -205,7 +218,8 @@ void RecursiveCompositeSolve(  //
       max_iterations,
       base_n,
       nLevels,
-      level + 1 );
+      level + 1,
+      stencil_type );
   }
 }
 
@@ -343,8 +357,8 @@ void DefineFABs(  //
   const amrex::DistributionMapping& dm )
 {
   constexpr int SingleComp = 1;
-  constexpr int PressureGhosts = 1;
-  constexpr int VelocityGhosts = 1;
+  constexpr int PressureGhosts = 2;
+  constexpr int VelocityGhosts = 2;
 
   // Pressure is cell-centered
   pressure.define( ba, dm, SingleComp, PressureGhosts );
@@ -802,13 +816,17 @@ void SingleLevelPressureSolve(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nLevels )
+  int nLevels,
+  PressureSolve::StencilType stencil_type )
 {
   BL_PROFILE( "SingleLevelPressureSolve" );
 
+  // Create stencil
+  auto stencil = PressureSolve::createStencil( stencil_type );
+
   // Allocate and compute divergence
   constexpr int ncomp = 1;
-  constexpr int nghost = 0;
+  constexpr int nghost = 0;    // Probably fine
   amrex::MultiFab divergence(  //
     pressure.boxArray(),
     pressure.DistributionMap(),
@@ -829,7 +847,8 @@ void SingleLevelPressureSolve(  //
     tolerance,
     max_iterations,
     base_n,
-    nLevels );
+    nLevels,
+    *stencil );
 }
 
 void CheckResults(  //
@@ -1041,11 +1060,13 @@ static void ComputeDivergence(  //
 static void GaussSeidelIteration(  //
   bool use_expected_BCs,
   amrex::MultiFab& pressure,
+  amrex::MultiFab& pressure_tmp,
   const amrex::MultiFab& divergence,
   const amrex::Geometry& geom,
   int iteration,
   int base_n,
-  int nLevels )
+  int nLevels,
+  const PressureSolve::StencilBase& stencil )
 {
   const amrex::Real dx = geom.CellSize( 0 );
   const amrex::Real dx2 = dx * dx;
@@ -1069,35 +1090,41 @@ static void GaussSeidelIteration(  //
     // Fill ghost cells with boundary conditions
     const int start_comp = 0;          // Starting component
     const int num_comp = 1;            // Number of components
-    const amrex::IntVect nghost( 1 );  // Ghost cell width
+    const amrex::IntVect nghost( 2 );  // Ghost cell width
     const amrex::Real time = 0.0;      // Time
     const int bccomp = 0;  // Starting component for boundary conditions
     physbc.FillBoundary( pressure, start_comp, num_comp, nghost, time, bccomp );
   }
 
+  pressure_tmp.ParallelCopy(  //
+    pressure,
+    0,
+    0,
+    1,
+    pressure.nGrow(),
+    pressure_tmp.nGrow() );
+
   // Now do standard Gauss-Seidel iteration for all cells in the domain
   for ( amrex::MFIter mfi( pressure ); mfi.isValid(); ++mfi ) {
     const amrex::Box& box = mfi.validbox();
     const auto& p_arr = pressure.array( mfi );
+    const auto& p_old_arr = pressure_tmp.array( mfi );
     const auto& div_arr = divergence.array( mfi );
 
     const auto lo = amrex::lbound( box );
     const auto hi = amrex::ubound( box );
-    constexpr amrex::Real one_sixth = 1.0 / 6.0;
 
     for ( int i = lo.x; i <= hi.x; ++i ) {
       for ( int j = lo.y; j <= hi.y; ++j ) {
         for ( int k = lo.z; k <= hi.z; ++k ) {
-          // Gauss-Seidel update with under-relaxation
-          p_arr( i, j, k ) =          //
-            one_sixth *               //
-            ( p_arr( i + 1, j, k ) +  //
-              p_arr( i - 1, j, k ) +  //
-              p_arr( i, j + 1, k ) +  //
-              p_arr( i, j - 1, k ) +  //
-              p_arr( i, j, k + 1 ) +  //
-              p_arr( i, j, k - 1 ) -  //
-              dx2 * div_arr( i, j, k ) );
+          // Use stencil to compute update
+          p_arr( i, j, k ) = stencil.computeGaussSeidelUpdate(  //
+            p_old_arr,
+            div_arr,
+            i,
+            j,
+            k,
+            dx2 );
         }
       }
     }
@@ -1110,7 +1137,8 @@ static void GaussSeidelIteration(  //
 static amrex::Real ComputeResidual(  //
   const amrex::MultiFab& pressure,
   const amrex::MultiFab& divergence,
-  const amrex::Geometry& geom )
+  const amrex::Geometry& geom,
+  const PressureSolve::StencilBase& stencil )
 {
   const amrex::Real dx = geom.CellSize( 0 );
   const amrex::Real dx2 = dx * dx;
@@ -1129,17 +1157,13 @@ static amrex::Real ComputeResidual(  //
     for ( int i = lo.x; i <= hi.x; ++i ) {
       for ( int j = lo.y; j <= hi.y; ++j ) {
         for ( int k = lo.z; k <= hi.z; ++k ) {
-          // Compute residual using central differences
-          const amrex::Real lap_p =   //
-            ( p_arr( i + 1, j, k ) +  //
-              p_arr( i - 1, j, k ) +  //
-              p_arr( i, j + 1, k ) +  //
-              p_arr( i, j - 1, k ) +  //
-              p_arr( i, j, k + 1 ) +  //
-              p_arr( i, j, k - 1 ) -  //
-              6.0 * p_arr( i, j, k ) ) /
-            dx2;
-
+          // Use stencil to compute Laplacian
+          const amrex::Real lap_p = stencil.computeLaplacian(  //
+            p_arr,
+            i,
+            j,
+            k,
+            dx2 );
           const amrex::Real res = lap_p - div_arr( i, j, k );
           residual += res * res;
           count++;
@@ -1163,7 +1187,8 @@ static void SolvePressureIterations(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nLevels )
+  int nLevels,
+  const PressureSolve::StencilBase& stencil )
 {
   BL_PROFILE( "SolvePressureIterations" );
 
@@ -1171,16 +1196,25 @@ static void SolvePressureIterations(  //
   int iteration = 0;
   const int print_interval = std::max( 1, max_iterations / 10 );
 
+  amrex::MultiFab pressure_tmp(  //
+    pressure.boxArray(),
+    pressure.DistributionMap(),
+    1,    // ncomp
+    2 );  // nghost
+  pressure_tmp.setVal( 0.0 );
+
   while ( residual > tolerance && iteration < max_iterations ) {
     GaussSeidelIteration(  //
       use_expected_BCs,
       pressure,
+      pressure_tmp,
       divergence,
       geom,
       iteration,
       base_n,
-      nLevels );
-    residual = ComputeResidual( pressure, divergence, geom );
+      nLevels,
+      stencil );
+    residual = ComputeResidual( pressure, divergence, geom, stencil );
     iteration++;
 
     if ( ( iteration % print_interval ) == 0 ) {
@@ -1323,9 +1357,13 @@ amrex::MultiFab ComputeFluxCorrection(  //
   const amrex::MultiFab& crse_pressure,
   const amrex::MultiFab& fine_pressure,
   const amrex::Geometry& crse_geom,
-  const amrex::Geometry& fine_geom )
+  const amrex::Geometry& fine_geom,
+  PressureSolve::StencilType stencil_type )
 {
   BL_PROFILE( "ComputeFluxCorrection" );
+
+  // Create stencil
+  auto stencil = PressureSolve::createStencil( stencil_type );
 
   // Calculate refinement ratio
   const amrex::IntVect ratio =  //
@@ -1422,7 +1460,7 @@ amrex::MultiFab ComputeFluxCorrection(  //
     crse_pressure.boxArray(),
     crse_pressure.DistributionMap(),
     1,    // ncomp
-    0 );  // nghost
+    0 );  // nghost // Probably fine
   correction_div.setVal( 0.0 );
 
   flux_reg.Reflux( correction_div, 1.0, 0, 0, 1, crse_geom );
@@ -1437,7 +1475,8 @@ void SolvePressureCorrection(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nLevels )
+  int nLevels,
+  PressureSolve::StencilType stencil_type )
 {
   BL_PROFILE( "SolvePressureCorrection" );
 
@@ -1445,13 +1484,14 @@ void SolvePressureCorrection(  //
     crse_pressure,
     fine_pressure,
     crse_geom,
-    fine_geom );
+    fine_geom,
+    stencil_type );
 
   amrex::MultiFab correction_solution(  //
     crse_pressure.boxArray(),
     crse_pressure.DistributionMap(),
     1,    // ncomp
-    1 );  // nghost
+    2 );  // nghost
   correction_solution.setVal( 0.0 );
 
   // Solve for the correction using the divergence as the right-hand side
@@ -1464,14 +1504,15 @@ void SolvePressureCorrection(  //
     tolerance,
     max_iterations,
     base_n,
-    nLevels );
+    nLevels,
+    *PressureSolve::createStencil( stencil_type ) );
 
   // Add correction to coarse pressure
   constexpr int srccomp = 0;
   constexpr int dstcomp = 0;
   constexpr int numcomp = 1;
-  constexpr int nghost = 0;
-  amrex::MultiFab::Add(  //
+  constexpr int nghost = 0; // 2;  //??
+  amrex::MultiFab::Add(      //
     crse_pressure,
     correction_solution,
     srccomp,
@@ -1550,8 +1591,8 @@ static amrex::Real Phi(  //
 
   // If r is at the same cell center as ri, use analytic solution
   if ( r2 < ( dx / 2.0 ) * ( dx / 2.0 ) ) {  // Within the source cube
-    // Analytic solution for self-potential at the center of the cube
-    return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
+    // Unknown derivation
+    return 4.0 / ( 4.0 * M_PI * dx );
   } else {
     return 1.0 / ( 4.0 * M_PI * std::sqrt( r2 ) );
   }

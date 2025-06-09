@@ -3,6 +3,7 @@
 /*--------------------------------------------------------------------
   standard includes
   --------------------------------------------------------------------*/
+#include "stencil.H"
 #include <AMReX_BCRec.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
@@ -10,7 +11,11 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_Vector.H>
 #include <array>
+#include <memory>
 #include <vector>
+
+// Forward declarations
+struct LevelData;
 
 struct LevelData
 {
@@ -30,7 +35,9 @@ void CompositeSolve(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nlevels );
+  int nLevels,
+  PressureSolve::StencilType stencil_type =
+    PressureSolve::StencilType::Standard5Point );
 
 // Sinle-level pressure solve
 void SingleLevelPressureSolve(  //
@@ -40,14 +47,15 @@ void SingleLevelPressureSolve(  //
   amrex::Real tolerance,
   int max_iterations,
   int base_n,
-  int nlevels );
+  int nLevels,
+  PressureSolve::StencilType stencil_type );
 
 // Verification and comparison
 void CheckResults(  //
   const amrex::MultiFab& pressure,
   const amrex::Geometry& geom,
   int base_n,
-  int nlevels );
+  int nLevels );
 void CompareMultiFabs(  //
   const LevelData& expected_level,
   const std::vector<LevelData>& level_data );
@@ -57,13 +65,13 @@ void SamplePressureAlongLine(  //
   const std::vector<LevelData>& level_data,
   const LevelData& fullFineSolution,
   int base_n,
-  int nlevels );
+  int nLevels );
 
 // Dense or sparse/composite mesh defintion
 LevelData MakeDenseLevelData(  //
   amrex::Real domain_length,
   int base_n,
-  int nlevels,
+  int nLevels,
   int level );
 std::vector<LevelData> MakeSparseCompositeLevels(  //
   int base_n,
