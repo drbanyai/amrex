@@ -1592,7 +1592,11 @@ static amrex::Real Phi(  //
   // If r is at the same cell center as ri, use analytic solution
   if ( r2 < ( dx / 2.0 ) * ( dx / 2.0 ) ) {  // Within the source cube
     // Unknown derivation
+#if 0
     return 4.0 / ( 4.0 * M_PI * dx );
+#else
+    return 2.0 * 1.516386 / ( 4.0 * M_PI * dx );
+#endif
   } else {
     return 1.0 / ( 4.0 * M_PI * std::sqrt( r2 ) );
   }
