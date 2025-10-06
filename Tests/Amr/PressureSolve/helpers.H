@@ -17,9 +17,8 @@
 // Forward declarations
 struct LevelData;
 
-struct LevelData
-{
-  LevelData( int base_n, int level, amrex::Real domain_length );
+struct LevelData {
+  LevelData(int base_n, int level, amrex::Real domain_length);
   const amrex::Geometry geom;
   amrex::MultiFab pressure;
   std::array<amrex::MultiFab, 3> velocity;
@@ -30,55 +29,43 @@ struct LevelData
 };
 
 // Entry point for recursive composite-mesh pressure solve
-void CompositeSolve(  //
-  std::vector<LevelData>& composite_levels,
-  amrex::Real tolerance,
-  int max_iterations,
-  int base_n,
-  int nLevels,
-  PressureSolve::StencilType stencil_type =
-    PressureSolve::StencilType::Standard5Point );
+void CompositeSolve( //
+    std::vector<LevelData> &composite_levels, amrex::Real tolerance,
+    int max_iterations, int base_n, int nLevels,
+    PressureSolve::StencilType stencil_type =
+        PressureSolve::StencilType::Standard5Point);
 
 // Sinle-level pressure solve
-void SingleLevelPressureSolve(  //
-  amrex::MultiFab& pressure,
-  const std::array<amrex::MultiFab, 3>& velocity,
-  const amrex::Geometry& geom,
-  amrex::Real tolerance,
-  int max_iterations,
-  int base_n,
-  int nLevels,
-  PressureSolve::StencilType stencil_type );
+void SingleLevelPressureSolve( //
+    amrex::MultiFab &pressure, const std::array<amrex::MultiFab, 3> &velocity,
+    const amrex::Geometry &geom, amrex::Real tolerance, int max_iterations,
+    int base_n, int nLevels, PressureSolve::StencilType stencil_type);
 
 // Verification and comparison
-void CheckResults(  //
-  const amrex::MultiFab& pressure,
-  const amrex::Geometry& geom,
-  int base_n,
-  int nLevels );
-void CompareMultiFabs(  //
-  const LevelData& expected_level,
-  const std::vector<LevelData>& level_data );
+void CheckResults( //
+    const amrex::MultiFab &pressure, const amrex::Geometry &geom, int base_n,
+    int nLevels);
+void CompareMultiFabs( //
+    const LevelData &expected_level, const std::vector<LevelData> &level_data);
 
 // Plotting
-void SamplePressureAlongLine(  //
-  const std::vector<LevelData>& level_data,
-  const LevelData& fullFineSolution,
-  int base_n,
-  int nLevels );
+void SamplePressureAlongLine( //
+    const std::vector<LevelData> &level_data, const LevelData &fullFineSolution,
+    int base_n, int nLevels);
 
 // Dense or sparse/composite mesh defintion
-LevelData MakeDenseLevelData(  //
-  amrex::Real domain_length,
-  int base_n,
-  int nLevels,
-  int level );
-std::vector<LevelData> MakeSparseCompositeLevels(  //
-  int base_n,
-  int nlevels,
-  amrex::Real domain_length );
+LevelData MakeDenseLevelData( //
+    amrex::Real domain_length, int base_n, int nLevels, int level);
+std::vector<LevelData> MakeSparseCompositeLevels( //
+    int base_n, int nlevels, amrex::Real domain_length);
 
-constexpr int CalculateFineN( int base_n, int nlevels );
+static int CalculateNForLevel(int base_n, int level) {
+  return base_n * (1 << level);
+}
+
+static int CalculateFineN(int base_n, int nlevels) {
+  return CalculateNForLevel(base_n, nlevels - 1);
+}
 
 /*--------------------------------------------------------------------
   End of file
