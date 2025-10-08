@@ -195,7 +195,7 @@ void MLCellABecLapT<MF>::define(
   this->m_face_mask_x.resize(this->m_num_amr_levels);
   this->m_face_mask_y.resize(this->m_num_amr_levels);
   this->m_face_mask_z.resize(this->m_num_amr_levels);
-  for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+  for (amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
     this->m_face_mask_x[amrlev].resize(this->m_num_mg_levels[amrlev]);
     this->m_face_mask_y[amrlev].resize(this->m_num_mg_levels[amrlev]);
     this->m_face_mask_z[amrlev].resize(this->m_num_mg_levels[amrlev]);
