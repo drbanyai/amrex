@@ -412,7 +412,7 @@ void MLCellABecLapT<MF>::define(
   // Create an overset mask of nullptrs that correspond to the number of levels
   // so that later pointer checks can be made without indexing out of bounds.
   this->m_overset_mask.resize(this->m_num_amr_levels);
-  for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+  for (amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
     this->m_overset_mask[amrlev].resize(this->m_num_mg_levels[amrlev]);
   }
 
