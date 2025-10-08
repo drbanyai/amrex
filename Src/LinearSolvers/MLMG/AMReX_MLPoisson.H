@@ -29,6 +29,15 @@ public:
       const Vector<iMultiFab const *> &a_overset_mask, // 1: unknown, 0: known
       const LPInfo &a_info = LPInfo(),
       const Vector<FabFactory<FAB> const *> &a_factory = {});
+
+  MLPoissonT(const Vector<Geometry> &a_geom, const Vector<BoxArray> &a_grids,
+             const Vector<DistributionMapping> &a_dmap,
+             const Vector<iMultiFab const *> &a_face_mask_x,
+             const Vector<iMultiFab const *> &a_face_mask_y,
+             const Vector<iMultiFab const *> &a_face_mask_z,
+             const LPInfo &a_info,
+             const Vector<FabFactory<FAB> const *> &a_factory = {});
+
   ~MLPoissonT() override;
 
   MLPoissonT(const MLPoissonT<MF> &) = delete;
@@ -45,6 +54,14 @@ public:
               const Vector<DistributionMapping> &a_dmap,
               const Vector<iMultiFab const *> &a_overset_mask,
               const LPInfo &a_info = LPInfo(),
+              const Vector<FabFactory<FAB> const *> &a_factory = {});
+
+  void define(const Vector<Geometry> &a_geom, const Vector<BoxArray> &a_grids,
+              const Vector<DistributionMapping> &a_dmap,
+              const Vector<iMultiFab const *> &a_face_mask_x,
+              const Vector<iMultiFab const *> &a_face_mask_y,
+              const Vector<iMultiFab const *> &a_face_mask_z,
+              const LPInfo &a_info,
               const Vector<FabFactory<FAB> const *> &a_factory = {});
 
   void prepareForSolve() final;
@@ -107,6 +124,19 @@ MLPoissonT<MF>::MLPoissonT(const Vector<Geometry> &a_geom,
 }
 
 template <typename MF>
+MLPoissonT<MF>::MLPoissonT(const Vector<Geometry> &a_geom,
+                           const Vector<BoxArray> &a_grids,
+                           const Vector<DistributionMapping> &a_dmap,
+                           const Vector<iMultiFab const *> &a_face_mask_x,
+                           const Vector<iMultiFab const *> &a_face_mask_y,
+                           const Vector<iMultiFab const *> &a_face_mask_z,
+                           const LPInfo &a_info,
+                           const Vector<FabFactory<FAB> const *> &a_factory) {
+  define(a_geom, a_grids, a_dmap, a_face_mask_x, a_face_mask_y, a_face_mask_z,
+         a_info, a_factory);
+}
+
+template <typename MF>
 void MLPoissonT<MF>::define(const Vector<Geometry> &a_geom,
                             const Vector<BoxArray> &a_grids,
                             const Vector<DistributionMapping> &a_dmap,
@@ -126,6 +156,20 @@ void MLPoissonT<MF>::define(const Vector<Geometry> &a_geom,
   BL_PROFILE("MLPoisson::define(overset)");
   MLCellABecLapT<MF>::define(a_geom, a_grids, a_dmap, a_overset_mask, a_info,
                              a_factory);
+}
+
+template <typename MF>
+void MLPoissonT<MF>::define(const Vector<Geometry> &a_geom,
+                            const Vector<BoxArray> &a_grids,
+                            const Vector<DistributionMapping> &a_dmap,
+                            const Vector<iMultiFab const *> &a_face_mask_x,
+                            const Vector<iMultiFab const *> &a_face_mask_y,
+                            const Vector<iMultiFab const *> &a_face_mask_z,
+                            const LPInfo &a_info,
+                            const Vector<FabFactory<FAB> const *> &a_factory) {
+  BL_PROFILE("MLPoisson::define(face_mask)");
+  MLCellABecLapT<MF>::define(a_geom, a_grids, a_dmap, a_face_mask_x,
+                             a_face_mask_y, a_face_mask_z, a_info, a_factory);
 }
 
 template <typename MF> MLPoissonT<MF>::~MLPoissonT() = default;
@@ -254,6 +298,18 @@ void MLPoissonT<MF>::Fapply(int amrlev, int mglev, MF &out,
           AMREX_HOST_DEVICE_PARALLEL_FOR_3D(bx2d, i, j, k, {
             amrex::ignore_unused(k);
             TwoD::mlpoisson_adotx(i, j, yfab2d, xfab2d, dh0, dh1);
+          });
+        } else if (this->m_face_mask_x[amrlev][mglev]) {
+          const auto &fm_x =
+              this->m_face_mask_x[amrlev][mglev]->const_array(mfi);
+          const auto &fm_y =
+              this->m_face_mask_y[amrlev][mglev]->const_array(mfi);
+          const auto &fm_z =
+              this->m_face_mask_z[amrlev][mglev]->const_array(mfi);
+
+          AMREX_HOST_DEVICE_PARALLEL_FOR_3D(bx, i, j, k, {
+            mlpoisson_adotx_fm(i, j, k, yfab, fm_x, fm_y, fm_z, xfab, dhx, dhy,
+                               dhz);
           });
         } else {
           AMREX_HOST_DEVICE_PARALLEL_FOR_3D(bx, i, j, k, {
@@ -721,11 +777,25 @@ void MLPoissonT<MF>::Fsmooth(int amrlev, int mglev, MF &sol, const MF &rhs,
         }
       } else {
         if (this->m_use_gauss_seidel) {
+          if (this->m_face_mask_x[amrlev][mglev]) {
+            AMREX_HOST_DEVICE_PARALLEL_FOR_3D(tbx, i, j, k, {
+              const auto &fmx =
+                  this->m_face_mask_x[amrlev][mglev]->const_array(mfi);
+              const auto &fmy =
+                  this->m_face_mask_y[amrlev][mglev]->const_array(mfi);
+              const auto &fmz =
+                  this->m_face_mask_z[amrlev][mglev]->const_array(mfi);
+              mlpoisson_gsrb_fm(i, j, k, solnfab, rhsfab, dhx, dhy, dhz, f0fab,
+                                m0, f1fab, m1, f2fab, m2, f3fab, m3, f4fab, m4,
+                                f5fab, m5, fmx, fmy, fmz, vbx, redblack);
+            });
+          } else {
           AMREX_HOST_DEVICE_PARALLEL_FOR_3D(tbx, i, j, k, {
             mlpoisson_gsrb(i, j, k, solnfab, rhsfab, dhx, dhy, dhz, f0fab, m0,
                            f1fab, m1, f2fab, m2, f3fab, m3, f4fab, m4, f5fab,
                            m5, vbx, redblack);
           });
+          }
         } else {
           const auto &axfab = Ax.const_array(mfi);
           AMREX_HOST_DEVICE_PARALLEL_FOR_3D(tbx, i, j, k, {

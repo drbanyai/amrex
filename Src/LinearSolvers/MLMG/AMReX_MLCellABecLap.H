@@ -35,6 +35,14 @@ public:
               const LPInfo &a_info = LPInfo(),
               const Vector<FabFactory<FAB> const *> &a_factory = {});
 
+  void define(const Vector<Geometry> &a_geom, const Vector<BoxArray> &a_grids,
+              const Vector<DistributionMapping> &a_dmap,
+              const Vector<iMultiFab const *> &a_face_mask_x,
+              const Vector<iMultiFab const *> &a_face_mask_y,
+              const Vector<iMultiFab const *> &a_face_mask_z,
+              const LPInfo &a_info = LPInfo(),
+              const Vector<FabFactory<FAB> const *> &a_factory = {});
+
   [[nodiscard]] iMultiFab const *getOversetMask(int amrlev, int mglev) const {
     return m_overset_mask[amrlev][mglev].get();
   }
@@ -80,6 +88,9 @@ public:
 
 protected:
   Vector<Vector<std::unique_ptr<iMultiFab>>> m_overset_mask;
+  Vector<Vector<std::unique_ptr<iMultiFab>>> m_face_mask_x;
+  Vector<Vector<std::unique_ptr<iMultiFab>>> m_face_mask_y;
+  Vector<Vector<std::unique_ptr<iMultiFab>>> m_face_mask_z;
 
   LPInfo m_lpinfo_arg;
 
@@ -98,6 +109,15 @@ void MLCellABecLapT<MF>::define(
   this->m_overset_mask.resize(this->m_num_amr_levels);
   for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
     this->m_overset_mask[amrlev].resize(this->m_num_mg_levels[amrlev]);
+  }
+
+  this->m_face_mask_x.resize(this->m_num_amr_levels);
+  this->m_face_mask_y.resize(this->m_num_amr_levels);
+  this->m_face_mask_z.resize(this->m_num_amr_levels);
+  for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+    this->m_face_mask_x[amrlev].resize(this->m_num_mg_levels[amrlev]);
+    this->m_face_mask_y[amrlev].resize(this->m_num_mg_levels[amrlev]);
+    this->m_face_mask_z[amrlev].resize(this->m_num_mg_levels[amrlev]);
   }
 }
 
@@ -172,6 +192,15 @@ void MLCellABecLapT<MF>::define(
 
   MLCellLinOpT<MF>::define(a_geom, a_grids, a_dmap, linfo, a_factory);
 
+  this->m_face_mask_x.resize(this->m_num_amr_levels);
+  this->m_face_mask_y.resize(this->m_num_amr_levels);
+  this->m_face_mask_z.resize(this->m_num_amr_levels);
+  for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+    this->m_face_mask_x[amrlev].resize(this->m_num_mg_levels[amrlev]);
+    this->m_face_mask_y[amrlev].resize(this->m_num_mg_levels[amrlev]);
+    this->m_face_mask_z[amrlev].resize(this->m_num_mg_levels[amrlev]);
+  }
+
   amrlev = 0;
   for (int mglev = 1; mglev < this->m_num_mg_levels[amrlev]; ++mglev) {
     MF foo(this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 0,
@@ -229,6 +258,331 @@ void MLCellABecLapT<MF>::define(
     for (int mglev = 0; mglev < this->m_num_mg_levels[amrlev]; ++mglev) {
       this->m_overset_mask[amrlev][mglev]->setBndry(1);
       this->m_overset_mask[amrlev][mglev]->FillBoundary(
+          this->m_geom[amrlev][mglev].periodicity());
+    }
+  }
+}
+
+template <typename MF>
+void MLCellABecLapT<MF>::define(
+    const Vector<Geometry> &a_geom, const Vector<BoxArray> &a_grids,
+    const Vector<DistributionMapping> &a_dmap,
+    const Vector<iMultiFab const *> &a_face_mask_x,
+    const Vector<iMultiFab const *> &a_face_mask_y,
+    const Vector<iMultiFab const *> &a_face_mask_z, const LPInfo &a_info,
+    const Vector<FabFactory<FAB> const *> &a_factory) {
+  BL_PROFILE("MLCellABecLap::define(overset)");
+
+  AMREX_ALWAYS_ASSERT(!this->hasHiddenDimension());
+
+  this->m_lpinfo_arg = a_info;
+
+  // Initialize the finest multigrid level data for each meshing level.
+  auto namrlevs = static_cast<int>(a_geom.size());
+  this->m_face_mask_x.resize(namrlevs);
+  this->m_face_mask_y.resize(namrlevs);
+  this->m_face_mask_z.resize(namrlevs);
+  for (int amrlev = 0; amrlev < namrlevs; ++amrlev) {
+    this->m_face_mask_x[amrlev].push_back(
+        std::make_unique<iMultiFab>(a_grids[amrlev], a_dmap[amrlev], 1, 1));
+    this->m_face_mask_y[amrlev].push_back(
+        std::make_unique<iMultiFab>(a_grids[amrlev], a_dmap[amrlev], 1, 1));
+    this->m_face_mask_z[amrlev].push_back(
+        std::make_unique<iMultiFab>(a_grids[amrlev], a_dmap[amrlev], 1, 1));
+    iMultiFab::Copy(*(this->m_face_mask_x[amrlev][0]), *a_face_mask_x[amrlev],
+                    0, 0, 1, 0);
+    iMultiFab::Copy(*(this->m_face_mask_y[amrlev][0]), *a_face_mask_y[amrlev],
+                    0, 0, 1, 0);
+    iMultiFab::Copy(*(this->m_face_mask_z[amrlev][0]), *a_face_mask_z[amrlev],
+                    0, 0, 1, 0);
+    if (amrlev > 1) {
+      AMREX_ALWAYS_ASSERT(amrex::refine(a_geom[amrlev - 1].Domain(), 2) ==
+                          a_geom[amrlev].Domain());
+    }
+  }
+
+  // TODO: This logic is only executed for amrlev 0. But the face mask is set at
+  // level 1. Is this a problem?
+  int amrlev = 0;
+  Box dom = a_geom[0].Domain();
+  for (int mglev = 1; mglev <= a_info.max_coarsening_level; ++mglev) {
+    AMREX_ALWAYS_ASSERT(this->mg_coarsen_ratio == 2);
+    iMultiFab const &fine_x = *(this->m_face_mask_x[amrlev][mglev - 1]);
+    iMultiFab const &fine_y = *(this->m_face_mask_y[amrlev][mglev - 1]);
+    iMultiFab const &fine_z = *(this->m_face_mask_z[amrlev][mglev - 1]);
+    if (dom.coarsenable(2)) {
+      bool foundCoarseFineMismatch = false;
+      dom.coarsen(2);
+      if (fine_x.boxArray().coarsenable(2)) {
+        auto crse_x =
+            std::make_unique<iMultiFab>(amrex::coarsen(fine_x.boxArray(), 2),
+                                        fine_x.DistributionMap(), 1, 1);
+        // TODO: We still need to determine how to handle coarse/fine mismatches
+        // in coarsen_face_mask(). i.e. Do we have logic to determine if a path
+        // exists through non-fixed faces at the finest level, and if so mark
+        // the coarse level as not fixed. Or do we just say if any fine cells
+        // are fixed, the corresponding coarse face is also fixed?
+        ReduceOps<ReduceOpSum> reduce_op;
+        ReduceData<int> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(*crse_x, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int const> const &fmsk = fine_x.const_array(mfi);
+          Array4<int> const &cmsk = crse_x->array(mfi);
+          reduce_op.eval(
+              bx, reduce_data,
+              [=] AMREX_GPU_HOST_DEVICE(Box const &b) -> ReduceTuple {
+                return {coarsen_face_mask(b, cmsk, fmsk)};
+              });
+        }
+        ReduceTuple hv = reduce_data.value(reduce_op);
+        if (amrex::get<0>(hv) == 0) {
+          this->m_face_mask_x[amrlev].push_back(std::move(crse_x));
+        } else {
+          foundCoarseFineMismatch = true;
+        }
+      }
+      if (fine_y.boxArray().coarsenable(2)) {
+        auto crse_y =
+            std::make_unique<iMultiFab>(amrex::coarsen(fine_y.boxArray(), 2),
+                                        fine_y.DistributionMap(), 1, 1);
+        ReduceOps<ReduceOpSum> reduce_op;
+        ReduceData<int> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(*crse_y, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int const> const &fmsk = fine_y.const_array(mfi);
+          Array4<int> const &cmsk = crse_y->array(mfi);
+          reduce_op.eval(
+              bx, reduce_data,
+              [=] AMREX_GPU_HOST_DEVICE(Box const &b) -> ReduceTuple {
+                return {coarsen_face_mask(b, cmsk, fmsk)};
+              });
+        }
+        ReduceTuple hv = reduce_data.value(reduce_op);
+        if (amrex::get<0>(hv) == 0) {
+          this->m_face_mask_y[amrlev].push_back(std::move(crse_y));
+        } else {
+          foundCoarseFineMismatch = true;
+        }
+      }
+      if (fine_z.boxArray().coarsenable(2)) {
+        auto crse_z =
+            std::make_unique<iMultiFab>(amrex::coarsen(fine_z.boxArray(), 2),
+                                        fine_z.DistributionMap(), 1, 1);
+        ReduceOps<ReduceOpSum> reduce_op;
+        ReduceData<int> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(*crse_z, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int const> const &fmsk = fine_z.const_array(mfi);
+          Array4<int> const &cmsk = crse_z->array(mfi);
+          reduce_op.eval(
+              bx, reduce_data,
+              [=] AMREX_GPU_HOST_DEVICE(Box const &b) -> ReduceTuple {
+                return {coarsen_face_mask(b, cmsk, fmsk)};
+              });
+        }
+        ReduceTuple hv = reduce_data.value(reduce_op);
+        if (amrex::get<0>(hv) == 0) {
+          this->m_face_mask_z[amrlev].push_back(std::move(crse_z));
+        } else {
+          foundCoarseFineMismatch = true;
+        }
+      }
+      if (foundCoarseFineMismatch) {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  MLCellLinOpT<MF>::define(a_geom, a_grids, a_dmap, a_info, a_factory);
+
+  // Create an overset mask of nullptrs that correspond to the number of levels
+  // so that later pointer checks can be made without indexing out of bounds.
+  this->m_overset_mask.resize(this->m_num_amr_levels);
+  for (int amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+    this->m_overset_mask[amrlev].resize(this->m_num_mg_levels[amrlev]);
+  }
+
+  // Populate the multigrid level face data at the coarsest meshing level.
+  amrlev = 0;
+  for (int mglev = 1; mglev < this->m_num_mg_levels[amrlev]; ++mglev) {
+    MF foo_x(this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 0,
+             MFInfo().SetAlloc(false));
+    // If BoxArrays and DistributionMaps used by the face masks and the linear
+    // operator are not the same, make them the same.
+    // Note that we assume that if one face mask is inconsistent, they all are.
+    if (!amrex::isMFIterSafe(*(this->m_face_mask_x[amrlev][mglev]), foo_x)) {
+      // Create iMultiFabs that have a BoxArray and DistributionMap that are
+      // consistent with this linear operator.
+      auto fm_x = std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1);
+      auto fm_y = std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1);
+      auto fm_z = std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1);
+
+      // Copy the face mask data into the temporary iMultiFabs.
+      fm_x->ParallelCopy(*(this->m_face_mask_x[amrlev][mglev]));
+      fm_y->ParallelCopy(*(this->m_face_mask_y[amrlev][mglev]));
+      fm_z->ParallelCopy(*(this->m_face_mask_z[amrlev][mglev]));
+
+      // Swap the temporary iMultiFabs with the member face masks.
+      std::swap(fm_x, this->m_face_mask_x[amrlev][mglev]);
+      std::swap(fm_y, this->m_face_mask_y[amrlev][mglev]);
+      std::swap(fm_z, this->m_face_mask_z[amrlev][mglev]);
+    }
+  }
+
+  // Now for each finer meshing level, populate the corresponding coarser
+  // multigrid level face data.
+  for (amrlev = 1; amrlev < this->m_num_amr_levels; ++amrlev) {
+    for (int mglev = 1; mglev < this->m_num_mg_levels[amrlev];
+         ++mglev) { // for ref_ratio 4
+
+      // Create the multigrid level face mask iMultiFabs
+      this->m_face_mask_x[amrlev].push_back(std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1));
+
+      this->m_face_mask_y[amrlev].push_back(std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1));
+
+      this->m_face_mask_z[amrlev].push_back(std::make_unique<iMultiFab>(
+          this->m_grids[amrlev][mglev], this->m_dmap[amrlev][mglev], 1, 1));
+
+#ifdef AMREX_USE_GPU
+      if (Gpu::inLaunchRegion() &&
+          this->m_face_mask_x[amrlev][mglev]->isFusingCandidate()) {
+        auto const &crsema = this->m_face_mask_x[amrlev][mglev]->arrays();
+        auto const &finema =
+            this->m_face_mask_x[amrlev][mglev - 1]->const_arrays();
+        ParallelFor(
+            *(this->m_face_mask_x[amrlev][mglev]),
+            [=] AMREX_GPU_DEVICE(int box_no, int i, int j, int k) noexcept {
+              coarsen_face_mask_x(i, j, k, crsema[box_no], finema[box_no]);
+            });
+        if (!Gpu::inNoSyncRegion()) {
+          Gpu::streamSynchronize();
+        }
+      } else
+#endif
+      {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        // Generate the coarse multigrid level X face mask data for a given
+        // meshing level.
+        for (MFIter mfi(*(this->m_face_mask_x[amrlev][mglev]),
+                        TilingIfNotGPU());
+             mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int> const &cmsk =
+              this->m_face_mask_x[amrlev][mglev]->array(mfi);
+          Array4<int const> const fmsk =
+              this->m_face_mask_x[amrlev][mglev - 1]->const_array(mfi);
+          AMREX_HOST_DEVICE_PARALLEL_FOR_3D(
+              bx, i, j, k, { coarsen_face_mask(i, j, k, cmsk, fmsk); });
+        }
+      }
+
+#ifdef AMREX_USE_GPU
+      if (Gpu::inLaunchRegion() &&
+          this->m_face_mask_y[amrlev][mglev]->isFusingCandidate()) {
+        auto const &crsema = this->m_face_mask_y[amrlev][mglev]->arrays();
+        auto const &finema =
+            this->m_face_mask_y[amrlev][mglev - 1]->const_arrays();
+        ParallelFor(
+            *(this->m_face_mask_y[amrlev][mglev]),
+            [=] AMREX_GPU_DEVICE(int box_no, int i, int j, int k) noexcept {
+              coarsen_face_mask_y(i, j, k, crsema[box_no], finema[box_no]);
+            });
+        if (!Gpu::inNoSyncRegion()) {
+          Gpu::streamSynchronize();
+        }
+      } else
+#endif
+      {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        // Generate the coarse multigrid level Y face mask data for a given
+        // meshing level.
+        for (MFIter mfi(*(this->m_face_mask_y[amrlev][mglev]),
+                        TilingIfNotGPU());
+             mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int> const &cmsk =
+              this->m_face_mask_y[amrlev][mglev]->array(mfi);
+          Array4<int const> const fmsk =
+              this->m_face_mask_y[amrlev][mglev - 1]->const_array(mfi);
+          AMREX_HOST_DEVICE_PARALLEL_FOR_3D(
+              bx, i, j, k, { coarsen_face_mask(i, j, k, cmsk, fmsk); });
+        }
+      }
+
+#ifdef AMREX_USE_GPU
+      if (Gpu::inLaunchRegion() &&
+          this->m_face_mask_z[amrlev][mglev]->isFusingCandidate()) {
+        auto const &crsema = this->m_face_mask_z[amrlev][mglev]->arrays();
+        auto const &finema =
+            this->m_face_mask_z[amrlev][mglev - 1]->const_arrays();
+        ParallelFor(
+            *(this->m_face_mask_z[amrlev][mglev]),
+            [=] AMREX_GPU_DEVICE(int box_no, int i, int j, int k) noexcept {
+              coarsen_face_mask_z(i, j, k, crsema[box_no], finema[box_no]);
+            });
+        if (!Gpu::inNoSyncRegion()) {
+          Gpu::streamSynchronize();
+        }
+      } else
+#endif
+      {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        // Generate the coarse multigrid level Z face mask data for a given
+        // meshing level.
+        for (MFIter mfi(*(this->m_face_mask_z[amrlev][mglev]),
+                        TilingIfNotGPU());
+             mfi.isValid(); ++mfi) {
+          const Box &bx = mfi.tilebox();
+          Array4<int> const &cmsk =
+              this->m_face_mask_z[amrlev][mglev]->array(mfi);
+          Array4<int const> const fmsk =
+              this->m_face_mask_z[amrlev][mglev - 1]->const_array(mfi);
+          AMREX_HOST_DEVICE_PARALLEL_FOR_3D(
+              bx, i, j, k, { coarsen_face_mask(i, j, k, cmsk, fmsk); });
+        }
+      }
+    }
+  }
+
+  // For all meshing and multigrid levels, do boundary fills of the face mask
+  // data.
+  for (amrlev = 0; amrlev < this->m_num_amr_levels; ++amrlev) {
+    for (int mglev = 0; mglev < this->m_num_mg_levels[amrlev]; ++mglev) {
+      this->m_face_mask_x[amrlev][mglev]->setBndry(1);
+      this->m_face_mask_x[amrlev][mglev]->FillBoundary(
+          this->m_geom[amrlev][mglev].periodicity());
+
+      this->m_face_mask_y[amrlev][mglev]->setBndry(1);
+      this->m_face_mask_y[amrlev][mglev]->FillBoundary(
+          this->m_geom[amrlev][mglev].periodicity());
+
+      this->m_face_mask_z[amrlev][mglev]->setBndry(1);
+      this->m_face_mask_z[amrlev][mglev]->FillBoundary(
           this->m_geom[amrlev][mglev].periodicity());
     }
   }

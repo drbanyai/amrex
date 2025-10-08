@@ -7,17 +7,23 @@
 /*--------------------------------------------------------------------
   standard includes
   --------------------------------------------------------------------*/
+#include "hydro_MacProjector.H"
 #include <AMReX_BCUtil.H>
 #include <AMReX_Config.H>
 #include <AMReX_FillPatchUtil.H>
 #include <AMReX_FluxRegister.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Interpolater.H>
+#include <AMReX_MLLinOp.H>
+#include <AMReX_MLMG.H>
+#include <AMReX_MLPoisson.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_PhysBCFunct.H>
+//#include <AMReX_PlotFileUtil.H>
 #include <AMReX_Print.H>
+#include <AMReX_Vector.H>
 
 /*--------------------------------------------------------------------
   defines and static variables
@@ -278,6 +284,9 @@ static void InitializeVelocity( //
       if (box.contains(source_i, source_j, source_k)) {
         const amrex::Real dx = geom.CellSize(0);
         u_arr(source_i, source_j, source_k) = 1.0 / (dx * dx);
+        fprintf(
+            stderr, "Setting initial velocity to: %g at cell (%d, %d, %d)\n",
+            u_arr(source_i, source_j, source_k), source_i, source_j, source_k);
       }
     }
 
@@ -698,6 +707,285 @@ void SingleLevelPressureSolve( //
       base_n, nLevels, *stencil);
 }
 
+void AmrexPressureSolve( //
+    std::vector<LevelData> &levelData, int nLevels) {
+
+  constexpr bool useHydro = false;
+  if (useHydro) {
+    fprintf(stderr, "Starting hydro solve\n");
+    amrex::Vector<amrex::Geometry> geoms;
+    amrex::Vector<amrex::BoxArray> grids;
+    amrex::Vector<amrex::DistributionMapping> dmaps;
+    amrex::Vector<amrex::Array<amrex::MultiFab *, 3>> vel;
+    for (int level = 0; level < nLevels; level++) {
+      geoms.push_back(levelData.at(level).geom);
+      amrex::BoxArray ccBA = levelData.at(level).velocity.at(0).boxArray();
+      ccBA.convert(amrex::IntVect::TheZeroVector());
+      grids.push_back(ccBA);
+      dmaps.push_back(levelData.at(level).velocity.at(0).DistributionMap());
+      amrex::Array<amrex::MultiFab *, 3> levelVelocity = {
+          &(levelData.at(level).velocity[0]),
+          &(levelData.at(level).velocity[1]),
+          &(levelData.at(level).velocity[2])};
+      vel.push_back(levelVelocity);
+    }
+
+    // Set up the hydro solve and project
+    amrex::Real beta = 1.0;
+    amrex::LPInfo defaultLPInfo;
+    Hydro::MacProjector projector(vel, beta, geoms, defaultLPInfo);
+    projector.setDomainBC({AMREX_D_DECL(amrex::LinOpBCType::Dirichlet,
+                                        amrex::LinOpBCType::Dirichlet,
+                                        amrex::LinOpBCType::Dirichlet)},
+                          {AMREX_D_DECL(amrex::LinOpBCType::Dirichlet,
+                                        amrex::LinOpBCType::Dirichlet,
+                                        amrex::LinOpBCType::Dirichlet)});
+
+    // Set up pressure storage
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> phi(nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      phi[level] =
+          std::make_unique<amrex::MultiFab>(grids[level], dmaps[level], 1, 1);
+      phi[level]->setVal(0.0);
+    }
+    amrex::Vector<amrex::MultiFab *> pressure(nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      pressure.at(level) = phi.at(level).get();
+    }
+
+    // Build up the right hand side to hold the initial divergence information.
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> rhs(nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      rhs[level] =
+          std::make_unique<amrex::MultiFab>(grids[level], dmaps[level], 1, 0);
+      rhs[level]->setVal(0.0);
+    }
+    fprintf(stderr, "Divergence information before hydro solve\n");
+    for (int level = 0; level < nLevels; level++) {
+      ComputeDivergence(*rhs.at(level), levelData.at(level).velocity,
+                        geoms.at(level));
+    }
+
+    // Execute the hydro pressure solve and project
+    amrex::Real reltol = 1.e-8;  // Define the relative tolerance
+    amrex::Real abstol = 1.e-15; // Define the absolute tolerance; note that
+                                 // this argument is optional
+    projector.project(pressure, reltol, abstol);
+
+    for (int level = 0; level < nLevels; level++) {
+      rhs[level]->setVal(0.0);
+    }
+    fprintf(stderr, "Divergence information after hydro solve\n");
+    for (int level = 0; level < nLevels; level++) {
+      ComputeDivergence(*rhs.at(level), levelData.at(level).velocity,
+                        geoms.at(level));
+    }
+  }
+
+  else {
+    fprintf(stderr, "Starting MLMG solve\n");
+    amrex::Vector<amrex::BoxArray> grids;
+    amrex::Vector<amrex::DistributionMapping> dmaps;
+    amrex::Vector<amrex::Geometry> geoms;
+    amrex::Vector<amrex::Array<amrex::MultiFab *, 3>> vel;
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> faceMaskX;
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> faceMaskY;
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> faceMaskZ;
+    for (int level = 0; level < nLevels; level++) {
+      amrex::BoxArray xFaceBA = levelData.at(level).velocity.at(0).boxArray();
+      amrex::BoxArray yFaceBA = levelData.at(level).velocity.at(1).boxArray();
+      amrex::BoxArray zFaceBA = levelData.at(level).velocity.at(2).boxArray();
+      amrex::BoxArray ccBA = levelData.at(level).velocity.at(0).boxArray();
+      ccBA.convert(amrex::IntVect::TheZeroVector());
+      grids.push_back(ccBA);
+      dmaps.push_back(levelData.at(level).velocity.at(0).DistributionMap());
+      geoms.push_back(levelData.at(level).geom);
+      amrex::Array<amrex::MultiFab *, 3> levelVelocity = {
+          &(levelData.at(level).velocity[0]),
+          &(levelData.at(level).velocity[1]),
+          &(levelData.at(level).velocity[2])};
+      vel.push_back(levelVelocity);
+      faceMaskX.push_back(std::make_unique<amrex::iMultiFab>(
+          xFaceBA, levelData.at(level).velocity.at(0).DistributionMap(), 1, 0));
+      faceMaskY.push_back(std::make_unique<amrex::iMultiFab>(
+          yFaceBA, levelData.at(level).velocity.at(0).DistributionMap(), 1, 0));
+      faceMaskZ.push_back(std::make_unique<amrex::iMultiFab>(
+          zFaceBA, levelData.at(level).velocity.at(0).DistributionMap(), 1, 0));
+      faceMaskX.at(level)->setVal(1);
+      faceMaskY.at(level)->setVal(1);
+      faceMaskZ.at(level)->setVal(1);
+    }
+
+    for (amrex::MFIter mfi(*faceMaskX[1]); mfi.isValid(); ++mfi) {
+      const amrex::Box &bx = mfi.validbox();
+      auto const &mask = faceMaskX[1]->array(mfi);
+      amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+        if (i == 4 && j == 4 && k == 4) {
+          mask(i, j, k) = 0;
+        }
+      });
+    }
+
+    // Set up the linear operator
+    amrex::LPInfo info;
+    std::unique_ptr<amrex::MLPoisson> linop =
+        std::make_unique<amrex::MLPoisson>(
+            geoms, grids, dmaps, amrex::GetVecOfConstPtrs(faceMaskX),
+            amrex::GetVecOfConstPtrs(faceMaskY),
+            amrex::GetVecOfConstPtrs(faceMaskZ), info);
+    //    std::unique_ptr<amrex::MLPoisson> linop =
+    //        std::make_unique<amrex::MLPoisson>(geoms, grids, dmaps, info);
+
+    linop->setDomainBC({AMREX_D_DECL(amrex::LinOpBCType::Dirichlet,
+                                     amrex::LinOpBCType::Dirichlet,
+                                     amrex::LinOpBCType::Dirichlet)},
+                       {AMREX_D_DECL(amrex::LinOpBCType::Dirichlet,
+                                     amrex::LinOpBCType::Dirichlet,
+                                     amrex::LinOpBCType::Dirichlet)});
+
+    // Allocate storage for solved pressures
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> phi(nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      linop->setLevelBC(level, nullptr);
+      phi[level] =
+          std::make_unique<amrex::MultiFab>(grids[level], dmaps[level], 1, 1);
+      phi[level]->setVal(0.0);
+    }
+
+    // Build up the right hand side to hold the initial divergence information.
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> rhs(nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      rhs[level] =
+          std::make_unique<amrex::MultiFab>(grids[level], dmaps[level], 1, 0);
+      rhs[level]->setVal(0.0);
+    }
+
+    fprintf(stderr, "Divergence information before MLMG solve\n");
+    for (int level = 0; level < nLevels; level++) {
+      ComputeDivergence(*rhs.at(level), levelData.at(level).velocity,
+                        geoms.at(level));
+    }
+
+    // Execute the pressure solve
+    amrex::MLMG mlmg(*linop);
+    mlmg.setVerbose(1);
+    mlmg.setBottomTolerance(1e-12);
+    mlmg.setMaxIter(50);
+    mlmg.solve(amrex::GetVecOfPtrs(phi), amrex::GetVecOfConstPtrs(rhs), 1e-12,
+               0.0);
+
+    // Do projection
+    amrex::Vector<amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>> m_fluxes(
+        nLevels);
+    for (int level = 0; level < nLevels; level++) {
+      for (int d = 0; d < AMREX_SPACEDIM; d++) {
+        m_fluxes[level][d].define(
+            amrex::convert(grids[level], amrex::IntVect::TheDimensionVector(d)),
+            dmaps[level], 1, 0);
+      }
+    }
+    mlmg.getFluxes(amrex::GetVecOfArrOfPtrs(m_fluxes),
+                   amrex::MLMG::Location::FaceCenter);
+
+    for (int lev = 0; lev < nLevels; ++lev) {
+      for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+        for (amrex::MFIter mfi(*vel.at(lev)[dir], amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi) {
+          const amrex::Box &bx = mfi.tilebox();
+          auto const &vel_arr = vel[lev][dir]->array(mfi);
+          auto const &flux_arr = m_fluxes[lev][dir].const_array(mfi);
+
+          amrex::ParallelFor(
+              bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                // Apply the projected correction
+                if (dir == 0 && i == 4 && j == 4 && k == 4) {
+                } else {
+                  vel_arr(i, j, k) += flux_arr(i, j, k);
+                }
+              });
+        }
+      }
+    }
+
+    for (int lev = 0; lev < nLevels; ++lev) {
+      for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+        for (amrex::MFIter mfi(*vel.at(lev)[dir], amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi) {
+          const amrex::Box &bx = mfi.tilebox();
+          auto const &vel_arr = vel[lev][dir]->array(mfi);
+
+          amrex::ParallelFor(
+              bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                //                if (i == 2 && j == 2 && k == 2) {
+                if (dir == 0) {
+                  fprintf(stderr, "Velocity at cell (%d, %d, %d) is: %g\n ", i,
+                          j, k, vel_arr(i, j, k));
+                }
+                //                }
+                //                if (dir == 0 && i == 3 && j == 2 && k == 2) {
+                //                  fprintf(stderr,
+                //                          "Velocity at cell (%d, %d, %d) is:
+                //                              % g\n ", i,
+                //                              j,
+                //                          k, vel_arr(i, j, k));
+                //                }
+
+                //                if (dir == 1 && i == 2 && j == 3 && k == 2) {
+                //                  fprintf(stderr,
+                //                          "Velocity at cell (%d, %d, %d) is:
+                //                              % g\n ", i,
+                //                              j,
+                //                          k, vel_arr(i, j, k));
+                //                }
+
+                //                if (dir == 2 && i == 2 && j == 2 && k == 3) {
+                //                  fprintf(stderr,
+                //                          "Velocity at cell (%d, %d, %d) is:
+                //                              % g\n ", i,
+                //                              j,
+                //                          k, vel_arr(i, j, k));
+                //                }
+              });
+        }
+      }
+    }
+
+    for (int lev = nLevels - 1; lev > 0; --lev) {
+
+      amrex::IntVect rr =
+          geoms[lev].Domain().size() / geoms[lev - 1].Domain().size();
+
+      amrex::average_down_faces(amrex::GetArrOfConstPtrs(vel[lev]),
+                                vel[lev - 1], rr, geoms[lev - 1]);
+    }
+
+    fprintf(stderr, "Divergence information after MLMG solve\n");
+    for (int level = 0; level < nLevels; level++) {
+      rhs[level]->setVal(0.0);
+    }
+    for (int level = 0; level < nLevels; level++) {
+      ComputeDivergence(*rhs.at(level), levelData.at(level).velocity,
+                        geoms.at(level));
+    }
+  }
+}
+
+// void WriteAmrexResults(std::vector<LevelData> &levelData, int nLevels) {
+// Size the vector to write out X velocities at each meshing level
+//  amrex::Vector<amrex::MultiFab> copy(nLevels);
+//  amrex::Vector<amrex::Geometry> geom(nLevels);
+//  for (int i = 0; i < nLevels; i++) {
+//    copy.at(i).define(levelData.at(i).velocity.at(0).boxArray(),
+//                      levelData.at(i).velocity.at(0).DistributionMap(),
+//                      levelData.at(i).velocity.at(0).nComp(),
+//                      levelData.at(i).velocity.at(0).nGrow());
+//    amrex::Copy(copy.at(i), levelData.at(i).velocity.at(0), 0, 0, 1, 1);
+//    geom.at(i) = levelData.at(i).geom;
+//  }
+
+//  amrex::WriteMLMF("Multilevel_Export", amrex::GetVecOfConstPtrs(copy), geom);
+//}
+
 void CheckResults( //
     const amrex::MultiFab &pressure, const amrex::Geometry &geom, int base_n,
     int nLevels) {
@@ -855,6 +1143,7 @@ static void ComputeDivergence( //
 
   const amrex::Real dx = geom.CellSize(0);
   const amrex::Real dxinv = 1.0 / dx;
+  fprintf(stderr, "dxinv: %g\n", dxinv);
 
   // Track maximum divergence for diagnostics
   amrex::Real max_div = 0.0;
@@ -877,6 +1166,11 @@ static void ComputeDivergence( //
               dxinv * (u_arr(i + 1, j, k) - u_arr(i, j, k) + //
                        v_arr(i, j + 1, k) - v_arr(i, j, k) + //
                        w_arr(i, j, k + 1) - w_arr(i, j, k));
+
+          if (std::abs(div_arr(i, j, k)) > 1e-5) {
+            fprintf(stderr, "divergence at cell(%d, %d, %d) is %g\n", i, j, k,
+                    div_arr(i, j, k));
+          }
 
           max_div = std::max(max_div, std::abs(div_arr(i, j, k)));
         }

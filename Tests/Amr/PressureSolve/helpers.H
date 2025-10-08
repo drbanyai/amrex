@@ -41,6 +41,11 @@ void SingleLevelPressureSolve( //
     const amrex::Geometry &geom, amrex::Real tolerance, int max_iterations,
     int base_n, int nLevels, PressureSolve::StencilType stencil_type);
 
+void AmrexPressureSolve( //
+    std::vector<LevelData> &levelData, int nLevels);
+
+// void WriteAmrexResults(std::vector<LevelData> &levelData, int nLevels);
+
 // Verification and comparison
 void CheckResults( //
     const amrex::MultiFab &pressure, const amrex::Geometry &geom, int base_n,

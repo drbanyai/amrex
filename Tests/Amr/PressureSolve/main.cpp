@@ -32,9 +32,10 @@ int main(int argc, char **argv) {
 
 int MyMain() {
   // Parse command line parameters
-  int nlevels = 3;
+  int nlevels = 2;
   int baseN = 4;
   bool dense = true;
+  bool hydro = true;
   amrex::Real domain_length = 1.0; // meters
   amrex::Real tolerance = 1.0e-8;
   int max_iterations = 500;
@@ -115,6 +116,12 @@ int MyMain() {
     // Sample results and create plots
     SamplePressureAlongLine( //
         composite_levels, dense_level, baseN, nlevels);
+  }
+  if (hydro) {
+    fprintf(stderr, "Starting AMReX solve\n");
+    AmrexPressureSolve(composite_levels, nlevels);
+    fprintf(stderr, "AMReX solve complete\n");
+    // WriteAmrexResults(composite_levels, nlevels);
   }
 
   return 0;
